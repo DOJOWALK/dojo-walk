@@ -32,6 +32,7 @@ type PayLaterRequest = {
   package: { walks_per_day: number; duration_minutes: number; monthly_price_inr: number } | null;
 };
 type BookingChangeRequest = { id: string; booking_id: string; customer_id: string; proposed_scheduled_at: string | null; proposed_service_address: string | null; proposed_latitude: number | null; proposed_longitude: number | null; proposed_service_slot: string | null; customer_note: string | null; status: string; admin_note: string | null; created_at: string; booking: { scheduled_at: string; service_address: string; service_slot: string | null; status: string; dog: { name: string } | null } | null; customer: { full_name: string | null; phone: string | null } | null };
+type SubscriptionScheduleChange = { id: string; subscription_id: string; proposed_morning_time: string | null; proposed_evening_time: string | null; proposed_service_address: string; proposed_latitude: number | null; proposed_longitude: number | null; customer_note: string | null; status: string; admin_note: string | null; created_at: string; dog: { name: string } | null; customer: { full_name: string | null; phone: string | null } | null; schedule: { morning_time: string | null; evening_time: string | null; service_address: string } | null };
 type PendingPayment = {
   id: string;
   amount_inr: number;
@@ -90,6 +91,7 @@ export default function App() {
   const [walkerPayouts, setWalkerPayouts] = useState<WalkerPayout[]>([]);
   const [adminCustomers, setAdminCustomers] = useState<AdminCustomer[]>([]);
   const [bookingChangeRequests, setBookingChangeRequests] = useState<BookingChangeRequest[]>([]);
+  const [subscriptionScheduleChanges, setSubscriptionScheduleChanges] = useState<SubscriptionScheduleChange[]>([]);
   const [operationsBusy, setOperationsBusy] = useState(false);
   const [operationsMessage, setOperationsMessage] = useState('');
 
@@ -219,7 +221,7 @@ export default function App() {
   const loadOperations = useCallback(async () => {
     if (!supabase) return;
     setOperationsBusy(true);
-    const [walkerResult, bookingResult, pricingResult, payoutResult, customerResult, changeRequestResult] = await Promise.all([
+    const [walkerResult, bookingResult, pricingResult, payoutResult, customerResult, changeRequestResult, scheduleChangeResult] = await Promise.all([
       supabase.from('walkers')
         .select('id,service_areas,experience_years,verification_status,profile:profiles!walkers_id_fkey(full_name,phone)')
         .order('created_at', { ascending: false }),
@@ -236,8 +238,11 @@ export default function App() {
       supabase.from('booking_change_requests')
         .select('id,booking_id,customer_id,proposed_scheduled_at,proposed_service_address,proposed_latitude,proposed_longitude,proposed_service_slot,customer_note,status,admin_note,created_at,booking:bookings!booking_change_requests_booking_id_fkey(scheduled_at,service_address,service_slot,status,dog:dogs(name)),customer:profiles!booking_change_requests_customer_id_fkey(full_name,phone)')
         .in('status', ['pending','needs_info','approved']).order('created_at', { ascending: true }).limit(100),
+      supabase.from('subscription_schedule_change_requests')
+        .select('id,subscription_id,proposed_morning_time,proposed_evening_time,proposed_service_address,proposed_latitude,proposed_longitude,customer_note,status,admin_note,created_at,dog:dogs(name),customer:profiles!subscription_schedule_change_requests_customer_id_fkey(full_name,phone),schedule:subscription_walk_schedules!subscription_schedule_change_requests_schedule_id_fkey(morning_time,evening_time,service_address)')
+        .eq('status', 'pending').order('created_at', { ascending: true }).limit(100),
     ]);
-    const failed = walkerResult.error || bookingResult.error || pricingResult.error || payoutResult.error || customerResult.error || changeRequestResult.error;
+    const failed = walkerResult.error || bookingResult.error || pricingResult.error || payoutResult.error || customerResult.error || changeRequestResult.error || scheduleChangeResult.error;
     if (failed) setOperationsMessage('Management data load नहीं हुआ: ' + failed.message);
     else {
       setWalkersAdmin((walkerResult.data ?? []) as unknown as WalkerAdmin[]);
@@ -248,6 +253,7 @@ export default function App() {
       setWalkerPayouts((payoutResult.data ?? []) as unknown as WalkerPayout[]);
       setAdminCustomers((customerResult.data ?? []) as unknown as AdminCustomer[]);
       setBookingChangeRequests((changeRequestResult.data ?? []) as unknown as BookingChangeRequest[]);
+      setSubscriptionScheduleChanges((scheduleChangeResult.data ?? []) as unknown as SubscriptionScheduleChange[]);
       setOperationsMessage('');
     }
     setOperationsBusy(false);
@@ -322,6 +328,20 @@ export default function App() {
     });
     if (reviewError) setOperationsMessage('Change request update nahi hui: ' + reviewError.message);
     else setOperationsMessage(decision === 'approve' ? 'Change approve karke booking par apply kar diya.' : decision === 'resolve' ? 'Request resolved mark ho gayi.' : decision === 'reject' ? 'Change request reject ho gayi.' : 'Customer se clarification maang li gayi.');
+    await loadOperations();
+    setOperationsBusy(false);
+  }
+
+  async function reviewSubscriptionScheduleChange(requestId: string, decision: 'approve' | 'reject') {
+    if (!supabase) return;
+    const note = decision === 'reject' ? window.prompt('Reject karne ka reason likhen:') : null;
+    if (decision === 'reject' && (!note || note.trim().length < 3)) return;
+    setOperationsBusy(true); setOperationsMessage('');
+    const { error: reviewError } = await supabase.rpc('admin_review_subscription_schedule_change', {
+      p_request_id: requestId, p_decision: decision, p_admin_note: note,
+    });
+    if (reviewError) setOperationsMessage('Weekly schedule request update nahi hui: ' + reviewError.message);
+    else setOperationsMessage(decision === 'approve' ? 'Weekly schedule approve ho gaya; future unassigned bookings naye time par generate hongi.' : 'Weekly schedule change reject ho gaya; purana schedule active hai.');
     await loadOperations();
     setOperationsBusy(false);
   }
@@ -554,6 +574,10 @@ export default function App() {
         <section className="panel route-panel" id="walkers">
           <div className="panel-heading"><div><h3>Walker management</h3><p>New walker accounts stay pending until Admin approval.</p></div><button className="refresh" onClick={() => void loadOperations()} disabled={operationsBusy}>Refresh</button></div>
           {walkersAdmin.length === 0 ? <p className="empty">अभी कोई walker account नहीं है।</p> : <div className="table-wrap"><table><thead><tr><th>Walker</th><th>Phone</th><th>Experience</th><th>Status</th><th>Action</th></tr></thead><tbody>{walkersAdmin.map((walker) => <tr key={walker.id}><td>{walker.profile?.full_name || walker.id.slice(0, 8)}</td><td>{walker.profile?.phone || '—'}</td><td>{walker.experience_years} years</td><td><span className={'pill ' + walker.verification_status}>{walker.verification_status}</span></td><td>{walker.verification_status === 'pending' ? <div className="payment-actions"><button className="refresh approve" disabled={operationsBusy} onClick={() => void reviewWalker(walker.id, 'approved')}>Approve</button><button className="refresh reject" disabled={operationsBusy} onClick={() => void reviewWalker(walker.id, 'rejected')}>Reject</button></div> : walker.verification_status === 'approved' ? <span className="subtle-count">Eligible for assignment</span> : '—'}</td></tr>)}</tbody></table></div>}
+        </section>
+        <section className="panel route-panel" id="weekly-schedule-requests">
+          <div className="panel-heading"><div><h3>Weekly schedule change requests</h3><p>Customer ke recurring morning/evening time aur service address changes review karein. Approval se pehle old schedule active rehta hai.</p></div><button className="refresh" onClick={() => void loadOperations()} disabled={operationsBusy}>Refresh</button></div>
+          {subscriptionScheduleChanges.length === 0 ? <p className="empty">Koi pending weekly schedule change nahi hai.</p> : <div className="payment-list">{subscriptionScheduleChanges.map((request) => <div className="payment-row payment-review-row" key={request.id}><div><strong>{request.dog?.name || 'Dog'} · Weekly schedule</strong><small>{request.customer?.full_name || 'Customer'} {request.customer?.phone ? '· ' + request.customer.phone : ''}</small>{request.customer?.phone ? <small><a className="map-link" href={'tel:' + request.customer.phone}>Contact customer ↗</a></small> : null}<small>Current: {request.schedule?.morning_time ? 'Morning ' + request.schedule.morning_time.slice(0,5) : ''}{request.schedule?.morning_time && request.schedule?.evening_time ? ' · ' : ''}{request.schedule?.evening_time ? 'Evening ' + request.schedule.evening_time.slice(0,5) : ''} · {request.schedule?.service_address || 'No address'}</small><small>Requested: {request.proposed_morning_time ? 'Morning ' + request.proposed_morning_time.slice(0,5) : ''}{request.proposed_morning_time && request.proposed_evening_time ? ' · ' : ''}{request.proposed_evening_time ? 'Evening ' + request.proposed_evening_time.slice(0,5) : ''} · {request.proposed_service_address}</small>{request.proposed_latitude !== null && request.proposed_longitude !== null ? <small><a className="map-link" href={'https://www.openstreetmap.org/?mlat=' + request.proposed_latitude + '&mlon=' + request.proposed_longitude + '#map=17/' + request.proposed_latitude + '/' + request.proposed_longitude} target="_blank" rel="noreferrer">Open requested pickup pin ↗</a></small> : null}{request.customer_note ? <small>Customer note: {request.customer_note}</small> : null}<div className="payment-actions"><button className="refresh approve" disabled={operationsBusy} onClick={() => void reviewSubscriptionScheduleChange(request.id, 'approve')}>Approve & apply</button><button className="refresh reject" disabled={operationsBusy} onClick={() => void reviewSubscriptionScheduleChange(request.id, 'reject')}>Reject</button></div></div><span className="pill pending">Pending</span></div>)}</div>}
         </section>
         <section className="panel route-panel" id="change-requests">
           <div className="panel-heading"><div><h3>Customer change requests</h3><p>Time, morning/evening slot, address ya map pin change Admin approval ke baad hi apply hoga.</p></div><span className="subtle-count">{bookingChangeRequests.length} open</span></div>
