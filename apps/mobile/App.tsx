@@ -585,7 +585,7 @@ export default function App() {
                   </View>
                 </View>;
               })}
-              {customerChangeRequests.length > 0 ? <View style={styles.notice}><Text style={styles.noticeTitle}>Change request status</Text>{customerChangeRequests.slice(0,6).map((request) => <Text key={request.id} style={styles.noticeBody}>{request.status.toUpperCase()} · {request.proposed_scheduled_at ? new Date(request.proposed_scheduled_at).toLocaleString('en-IN') : 'Schedule unchanged'}{request.admin_note ? ' · Admin: ' + request.admin_note : ''}</Text>)}</View> : null}
+              {customerChangeRequests.length > 0 ? <View style={styles.notice}><Text style={styles.noticeTitle}>Change request status</Text>{customerChangeRequests.slice(0,6).map((request) => <Text key={request.id} style={styles.noticeBody}>{request.status.toUpperCase()} · {request.proposed_scheduled_at ? new Date(request.proposed_scheduled_at).toLocaleString('en-IN') : 'Schedule unchanged'}{request.proposed_service_slot ? ' · ' + request.proposed_service_slot : ''}{request.admin_note ? ' · Admin: ' + request.admin_note : ''}</Text>)}</View> : null}
               <View style={styles.sectionHeader}><View><Text style={styles.sectionTitle}>Monthly Packages</Text><Text style={styles.sectionHint}>Monday–Saturday · प्रति dog अलग package</Text></View></View>
               {dogs.length > 0 ? <>
                 <Text style={styles.label}>किस dog के लिए package चाहिए?</Text>
