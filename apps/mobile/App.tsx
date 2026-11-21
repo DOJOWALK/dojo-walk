@@ -12,7 +12,8 @@ type Profile = { role: 'customer' | 'walker' | 'admin'; full_name: string | null
 type Dog = { id: string; name: string; breed: string | null; age_years: number | null; notes: string | null; service_address: string | null; service_latitude: number | null; service_longitude: number | null };
 type Package = { id: string; walks_per_day: number; duration_minutes: number; monthly_price_inr: number };
 type Subscription = { id: string; dog_id: string; walks_per_day: number; duration_minutes: number; monthly_price_inr: number; starts_on: string; ends_on: string; status: string };
-type CustomerWalk = { id: string; scheduled_at: string; status: string; actual_started_at: string | null; actual_ended_at: string | null; actual_duration_minutes: number | null; walk_report: string | null; dog: { name: string } | null };
+type CustomerWalk = { id: string; scheduled_at: string; service_address: string; service_slot: string | null; status: string; actual_started_at: string | null; actual_ended_at: string | null; actual_duration_minutes: number | null; walk_report: string | null; dog: { name: string } | null };
+type CustomerChangeRequest = { id: string; booking_id: string; status: string; proposed_scheduled_at: string | null; proposed_service_address: string | null; proposed_service_slot: string | null; admin_note: string | null; created_at: string };
 type RoutePoint = { id: number; booking_id: string; latitude: number; longitude: number; recorded_at: string };
 type AssignedWalk = { id: string; scheduled_at: string; duration_minutes: number; service_address: string; customer_notes: string | null; status: string; actual_started_at: string | null; actual_ended_at: string | null; actual_duration_minutes: number | null; walk_report: string | null; dog: { name: string; breed: string | null } | null };
 
@@ -75,6 +76,12 @@ export default function App() {
   const [payLaterRequests, setPayLaterRequests] = useState<{ id: string; dog_id: string; status: string; created_at: string }[]>([]);
   const [assignedWalks, setAssignedWalks] = useState<AssignedWalk[]>([]);
   const [customerWalks, setCustomerWalks] = useState<CustomerWalk[]>([]);
+  const [customerChangeRequests, setCustomerChangeRequests] = useState<CustomerChangeRequest[]>([]);
+  const [changeBookingId, setChangeBookingId] = useState('');
+  const [changeSchedule, setChangeSchedule] = useState('');
+  const [changeAddress, setChangeAddress] = useState('');
+  const [changeSlot, setChangeSlot] = useState<'morning' | 'evening'>('morning');
+  const [changeNote, setChangeNote] = useState('');
   const [customerRoutePoints, setCustomerRoutePoints] = useState<RoutePoint[]>([]);
   const [loadingData, setLoadingData] = useState(false);
   const [showDogForm, setShowDogForm] = useState(false);
@@ -134,12 +141,17 @@ export default function App() {
   const loadCustomerWalks = useCallback(async () => {
     if (!supabase || !userId || profile?.role !== 'customer') return;
     const { data: bookings, error: bookingError } = await supabase.from('bookings')
-      .select('id, scheduled_at, status, actual_started_at, actual_ended_at, actual_duration_minutes, walk_report, dog:dogs(name)')
+      .select('id, scheduled_at, service_address, service_slot, status, actual_started_at, actual_ended_at, actual_duration_minutes, walk_report, dog:dogs(name)')
       .eq('customer_id', userId).in('status', ['requested', 'assigned', 'accepted', 'in_progress', 'completed'])
       .order('scheduled_at', { ascending: false }).limit(20);
     if (bookingError) { setError('Walk history load नहीं हुई: ' + bookingError.message); return; }
     const rows = (bookings ?? []) as unknown as CustomerWalk[];
     setCustomerWalks(rows);
+    const { data: changeRows, error: changeError } = await supabase.from('booking_change_requests')
+      .select('id,booking_id,status,proposed_scheduled_at,proposed_service_address,proposed_service_slot,admin_note,created_at')
+      .eq('customer_id', userId).order('created_at', { ascending: false }).limit(30);
+    if (changeError) setError('Change request history load नहीं हुई: ' + changeError.message);
+    else setCustomerChangeRequests((changeRows ?? []) as CustomerChangeRequest[]);
     const ids = rows.map((item) => item.id);
     if (!ids.length) { setCustomerRoutePoints([]); return; }
     const { data: points, error: pointError } = await supabase.from('walker_locations')
@@ -350,6 +362,38 @@ export default function App() {
     setBusy(false);
   }
 
+  async function submitBookingChangeRequest(bookingId: string) {
+    if (!supabase) return;
+    let proposedAt: string | null = null;
+    if (changeSchedule.trim()) {
+      const match = /^(\\d{4})-(\\d{2})-(\\d{2})\\s+(\\d{2}):(\\d{2})$/.exec(changeSchedule.trim());
+      if (!match) { setError('New date/time YYYY-MM-DD HH:MM format में डालें।'); return; }
+      const [, y, m, d, h, min] = match;
+      const dt = new Date(Number(y), Number(m)-1, Number(d), Number(h), Number(min));
+      if (dt.getFullYear() !== Number(y) || dt.getMonth() !== Number(m)-1 || dt.getDate() !== Number(d) || dt.getHours() !== Number(h) || dt.getMinutes() !== Number(min) || dt.getTime() <= Date.now()) { setError('Future की सही date और time डालें।'); return; }
+      proposedAt = dt.toISOString();
+    }
+    if (!proposedAt && !changeAddress.trim() && bookingLatitude === null) { setError('Time, address या map location में कम से कम एक change दें।'); return; }
+    setBusy(true); setError(''); setMessage('');
+    const { error: requestError } = await supabase.rpc('customer_submit_booking_change_request_with_slot', {
+      p_booking_id: bookingId,
+      p_proposed_scheduled_at: proposedAt,
+      p_proposed_service_address: changeAddress.trim() || null,
+      p_proposed_latitude: bookingLatitude,
+      p_proposed_longitude: bookingLongitude,
+      p_customer_note: changeNote.trim() || null,
+      p_proposed_service_slot: changeSlot,
+    });
+    if (requestError) setError('Change request submit नहीं हुई: ' + requestError.message);
+    else {
+      setChangeBookingId(''); setChangeSchedule(''); setChangeAddress(''); setChangeNote('');
+      setBookingLatitude(null); setBookingLongitude(null);
+      setMessage('Change request Admin को भेज दी गई है। Approval होने तक पुराना schedule ही active रहेगा।');
+      await loadCustomerWalks();
+    }
+    setBusy(false);
+  }
+
   async function submitPayLaterRequest() {
     if (!supabase || !selectedDogId || !selectedPackageId) {
       setError('पहले dog और package चुनें।');
@@ -497,7 +541,7 @@ export default function App() {
                 <Text style={styles.sectionTitle}>Request a subscription walk</Text>
                 <Text style={styles.footnote}>Active monthly package वाले dog के लिए Monday–Saturday walk request करें। Daily walk limit database automatically check करेगा।</Text>
                 <Text style={styles.label}>Dog</Text>
-                <View style={styles.choiceRow}>{dogs.map((dog) => <Pressable key={dog.id} onPress={() => setSelectedDogId(dog.id)} style={[styles.dogChoice, selectedDogId === dog.id && styles.dogChoiceSelected]}><Text style={[styles.dogChoiceText, selectedDogId === dog.id && styles.dogChoiceTextSelected]}>{dog.name}</Text></Pressable>)}</View>
+                <View style={styles.choiceRow}>{dogs.map((dog) => <Pressable key={dog.id} onPress={() => { setSelectedDogId(dog.id); setBookingAddress(dog.service_address || ''); setBookingLatitude(dog.service_latitude); setBookingLongitude(dog.service_longitude); }} style={[styles.dogChoice, selectedDogId === dog.id && styles.dogChoiceSelected]}><Text style={[styles.dogChoiceText, selectedDogId === dog.id && styles.dogChoiceTextSelected]}>{dog.name}</Text></Pressable>)}</View>
                 {selectedDogSubscription ? <>
                   <Text style={styles.label}>Walk slot</Text>
                   <View style={styles.choiceRow}><Pressable onPress={() => setBookingSlot('morning')} style={[styles.dogChoice, bookingSlot === 'morning' && styles.dogChoiceSelected]}><Text style={[styles.dogChoiceText, bookingSlot === 'morning' && styles.dogChoiceTextSelected]}>Morning</Text></Pressable><Pressable onPress={() => setBookingSlot('evening')} style={[styles.dogChoice, bookingSlot === 'evening' && styles.dogChoiceSelected]}><Text style={[styles.dogChoiceText, bookingSlot === 'evening' && styles.dogChoiceTextSelected]}>Evening</Text></Pressable></View>
@@ -523,13 +567,24 @@ export default function App() {
                     <Text style={styles.dogName}>{walk.dog?.name || 'Dog walk'} · {walk.status === 'in_progress' ? 'Live walk' : walk.status === 'completed' ? 'Completed' : walk.status.charAt(0).toUpperCase() + walk.status.slice(1)}</Text>
                     <Text style={styles.dogMeta}>{new Date(walk.scheduled_at).toLocaleString('en-IN', { dateStyle: 'medium', timeStyle: 'short' })}</Text>
                     <Text style={styles.dogMeta}>{points.length} GPS points recorded</Text>
+                    <Text style={styles.dogMeta}>{walk.service_slot ? walk.service_slot.toUpperCase() + ' · ' : ''}{walk.service_address}</Text>
                     {walk.actual_duration_minutes ? <Text style={styles.dogMeta}>Duration: {walk.actual_duration_minutes} minutes</Text> : null}
+                    {['requested','assigned','accepted'].includes(walk.status) ? <Pressable style={styles.outlineButton} onPress={() => { setChangeBookingId(changeBookingId === walk.id ? '' : walk.id); setChangeSchedule(''); setChangeAddress(''); setChangeSlot(walk.service_slot === 'evening' ? 'evening' : 'morning'); setChangeNote(''); setBookingLatitude(null); setBookingLongitude(null); }}><Text style={styles.outlineText}>{changeBookingId === walk.id ? 'Close change form' : 'Request time / address change'}</Text></Pressable> : null}
+                    {changeBookingId === walk.id ? <View style={styles.paymentPanel}>
+                      <Text style={styles.label}>New date & exact time (optional) · YYYY-MM-DD HH:MM</Text><TextInput value={changeSchedule} onChangeText={setChangeSchedule} placeholder="2026-11-25 08:00" style={styles.input} />
+                      <Text style={styles.label}>New slot</Text><View style={styles.choiceRow}><Pressable onPress={() => setChangeSlot('morning')} style={[styles.dogChoice, changeSlot === 'morning' && styles.dogChoiceSelected]}><Text style={[styles.dogChoiceText, changeSlot === 'morning' && styles.dogChoiceTextSelected]}>Morning</Text></Pressable><Pressable onPress={() => setChangeSlot('evening')} style={[styles.dogChoice, changeSlot === 'evening' && styles.dogChoiceSelected]}><Text style={[styles.dogChoiceText, changeSlot === 'evening' && styles.dogChoiceTextSelected]}>Evening</Text></Pressable></View>
+                      <Text style={styles.label}>New address (optional)</Text><TextInput value={changeAddress} onChangeText={setChangeAddress} placeholder="New flat / tower / gate..." style={styles.input} maxLength={300} />
+                      <Pressable style={styles.outlineButton} onPress={() => void captureServiceLocation(false)}><Text style={styles.outlineText}>📍 Share new location pin</Text></Pressable>
+                      <Text style={styles.label}>Reason / note</Text><TextInput value={changeNote} onChangeText={setChangeNote} placeholder="Please explain the change" style={styles.input} maxLength={1000} />
+                      <Pressable style={[styles.primaryButton, busy && styles.disabled]} onPress={() => void submitBookingChangeRequest(walk.id)} disabled={busy}><Text style={styles.primaryText}>Send change request</Text></Pressable>
+                    </View> : null}
                     {walk.walk_report ? <Text style={styles.dogMeta}>Walker report: {walk.walk_report}</Text> : null}
                     {latest ? <><Text style={styles.dogMeta}>Latest GPS: {latest.latitude.toFixed(5)}, {latest.longitude.toFixed(5)}</Text><Pressable style={styles.textButton} onPress={() => void Linking.openURL(mapUrl)}><Text style={styles.textButtonLabel}>Open latest location in map ↗</Text></Pressable></> : <Text style={styles.dogMeta}>GPS location अभी उपलब्ध नहीं है।</Text>}
                     {first && latest && points.length > 1 ? <Text style={styles.dogMeta}>Route range: {first.latitude.toFixed(5)}, {first.longitude.toFixed(5)} → {latest.latitude.toFixed(5)}, {latest.longitude.toFixed(5)}</Text> : null}
                   </View>
                 </View>;
               })}
+              {customerChangeRequests.length > 0 ? <View style={styles.notice}><Text style={styles.noticeTitle}>Change request status</Text>{customerChangeRequests.slice(0,6).map((request) => <Text key={request.id} style={styles.noticeBody}>{request.status.toUpperCase()} · {request.proposed_scheduled_at ? new Date(request.proposed_scheduled_at).toLocaleString('en-IN') : 'Schedule unchanged'}{request.admin_note ? ' · Admin: ' + request.admin_note : ''}</Text>)}</View> : null}
               <View style={styles.sectionHeader}><View><Text style={styles.sectionTitle}>Monthly Packages</Text><Text style={styles.sectionHint}>Monday–Saturday · प्रति dog अलग package</Text></View></View>
               {dogs.length > 0 ? <>
                 <Text style={styles.label}>किस dog के लिए package चाहिए?</Text>
