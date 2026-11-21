@@ -1,8 +1,37 @@
 {
   "expo": {
-    "name":"DOJO WALK","slug":"dojo-walk","scheme":"dojowalk","version":"1.0.0",
-    "orientation":"portrait","userInterfaceStyle":"light","plugins":["expo-sqlite"],
-    "ios":{"supportsTablet":true,"bundleIdentifier":"com.dojowalk.app"},
-    "android":{"package":"com.dojowalk.app"}
+    "name": "DOJO WALK",
+    "slug": "dojo-walk",
+    "scheme": "dojowalk",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "light",
+    "plugins": [
+      "expo-sqlite",
+      [
+        "expo-location",
+        {
+          "locationWhenInUsePermission": "DOJO WALK uses your location during an active dog walk to share the route with the customer and Admin.",
+          "locationAlwaysAndWhenInUsePermission": "DOJO WALK uses your location during an active dog walk, including when the app is in the background, to share the route with the customer and Admin.",
+          "isIosBackgroundLocationEnabled": true,
+          "isAndroidBackgroundLocationEnabled": true,
+          "isAndroidForegroundServiceEnabled": true
+        }
+      ]
+    ],
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.dojowalk.app"
+    },
+    "android": {
+      "package": "com.dojowalk.app",
+      "permissions": [
+        "ACCESS_COARSE_LOCATION",
+        "ACCESS_FINE_LOCATION",
+        "ACCESS_BACKGROUND_LOCATION",
+        "FOREGROUND_SERVICE",
+        "FOREGROUND_SERVICE_LOCATION"
+      ]
+    }
   }
 }
