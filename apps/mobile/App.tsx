@@ -9,7 +9,7 @@ import { isSupabaseConfigured, supabase } from './lib/supabase';
 type Profile = { role: 'customer' | 'walker' | 'admin'; full_name: string | null; phone: string | null };
 type Dog = { id: string; name: string; breed: string | null; age_years: number | null; notes: string | null };
 type Package = { id: string; walks_per_day: number; duration_minutes: number; monthly_price_inr: number };
-type Subscription = { id: string; dog_id: string; walks_per_day: number; duration_minutes: number; monthly_price_inr: number; starts_on: string; ends_on: string; status: string };
+type Subscription = { id: string; dog_id: string; walks_per_day: number; duration_minutes: number; monthly_price_inr: number; starts_on: string; ends_on: string; status: string };\ntype AssignedWalk = { id: string; scheduled_at: string; duration_minutes: number; service_address: string; customer_notes: string | null; status: string; dog: { name: string; breed: string | null } | null };
 
 function normalizeIndianPhone(value: string) {
   const digits = value.replace(/\D/g, '');
@@ -31,7 +31,7 @@ export default function App() {
   const [error, setError] = useState('');
   const [dogs, setDogs] = useState<Dog[]>([]);
   const [packages, setPackages] = useState<Package[]>([]);
-  const [subscriptions, setSubscriptions] = useState<Subscription[]>([]);
+  const [subscriptions, setSubscriptions] = useState<Subscription[]>([]);\n  const [assignedWalks, setAssignedWalks] = useState<AssignedWalk[]>([]);
   const [loadingData, setLoadingData] = useState(false);
   const [showDogForm, setShowDogForm] = useState(false);
   const [dogName, setDogName] = useState('');
@@ -86,7 +86,18 @@ export default function App() {
     return () => { alive = false; listener.subscription.unsubscribe(); };
   }, []);
 
-  useEffect(() => { if (profile?.role === 'customer' && userId) void loadCustomerData(); }, [profile?.role, userId, loadCustomerData]);
+  useEffect(() => { if (profile?.role === 'customer' && userId) void loadCustomerData(); }, [profile?.role, userId, loadCustomerData]);\n  useEffect(() => { if (profile?.role === 'walker' && userId) void loadWalkerData(); }, [profile?.role, userId, loadWalkerData]);
+
+  const loadWalkerData = useCallback(async () => {
+    if (!supabase || !userId || profile?.role !== 'walker') return;
+    setLoadingData(true); setError('');
+    const { data, error: queryError } = await supabase.from('bookings')
+      .select('id, scheduled_at, duration_minutes, service_address, customer_notes, status, dog:dogs(name, breed)')
+      .eq('walker_id', userId).order('scheduled_at', { ascending: true }).limit(50);
+    if (queryError) setError('Assigned walks load नहीं हुए: ' + queryError.message);
+    else setAssignedWalks((data ?? []) as unknown as AssignedWalk[]);
+    setLoadingData(false);
+  }, [userId, profile?.role]);
 
   async function sendOtp() {
     if (!supabase) return;
@@ -197,10 +208,17 @@ export default function App() {
               </View>)}
               <View style={styles.notice}><Text style={styles.noticeTitle}>Package activation</Text><Text style={styles.noticeBody}>Package चुनने और UPI payment के बाद Admin verification से subscription activate होगा। फिलहाल इस app में package request और payment submit सुविधा अगली stage में जोड़ी जाएगी।</Text></View>
               <Pressable style={styles.textButton} onPress={() => void loadCustomerData()}><Text style={styles.textButtonLabel}>↻ Refresh my details</Text></Pressable>
+            </> : profile.role === 'walker' ? <>
+              <View style={styles.sectionHeader}><View><Text style={styles.sectionTitle}>मेरी Assigned Walks</Text><Text style={styles.sectionHint}>सिर्फ आपको assign की गई walks दिखाई जाती हैं।</Text></View><Pressable style={styles.smallPrimary} onPress={() => void loadWalkerData()}><Text style={styles.smallPrimaryText}>Refresh</Text></Pressable></View>
+              {loadingData ? <ActivityIndicator color="#F07824" style={{ margin: 20 }} /> : assignedWalks.length === 0 ? <View style={styles.empty}><Text style={styles.emptyTitle}>अभी कोई walk assign नहीं हुई</Text><Text style={styles.body}>Admin द्वारा आपको dog और walk assign करने पर वह यहाँ दिखाई देगी।</Text></View> : assignedWalks.map((walk) => <View style={styles.dogCard} key={walk.id}>
+                <View style={styles.dogAvatar}><Text style={styles.dogAvatarText}>{(walk.dog?.name || 'D').slice(0, 1).toUpperCase()}</Text></View>
+                <View style={{ flex: 1 }}><Text style={styles.dogName}>{walk.dog?.name || 'Assigned dog'}</Text><Text style={styles.dogMeta}>{walk.dog?.breed || 'Breed not listed'} · {walk.duration_minutes} minutes</Text><Text style={styles.dogMeta}>{new Date(walk.scheduled_at).toLocaleString('en-IN', { dateStyle: 'medium', timeStyle: 'short' })}</Text><Text style={styles.dogStatus}>{walk.status.replace('_', ' ')}</Text><Text style={styles.dogMeta}>{walk.service_address}</Text>{walk.customer_notes ? <Text style={styles.dogMeta}>Note: {walk.customer_notes}</Text> : null}</View>
+              </View>)}
+              <View style={styles.notice}><Text style={styles.noticeTitle}>Walk controls coming next</Text><Text style={styles.noticeBody}>Start/Stop Walk, live GPS और walk report अगली सुरक्षित development stage में जोड़े जाएँगे। अभी यह assigned walk list केवल देखने के लिए है।</Text></View>
             </> : <View style={styles.card}>
               <Text style={styles.cardEyebrow}>{roleText.toUpperCase()}</Text>
-              <Text style={styles.welcome}>आपका account जुड़ गया है।</Text>
-              <Text style={styles.body}>{profile.role === 'walker' ? 'Walker के assigned dogs, walk start/stop, GPS और reports वाला workspace अगली development stage में बनेगा।' : 'Admin का पूरा workspace web dashboard पर उपलब्ध होगा।'}</Text>
+              <Text style={styles.welcome}>Admin account connected</Text>
+              <Text style={styles.body}>Admin का पूरा workspace web dashboard पर उपलब्ध होगा।</Text>
               <Pressable style={styles.primaryButton} onPress={() => void signOut()}><Text style={styles.primaryText}>Sign out</Text></Pressable>
             </View>}
             {error ? <Text style={styles.error}>{error}</Text> : null}
