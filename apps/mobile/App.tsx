@@ -64,6 +64,7 @@ export default function App() {
   const [selectedDogId, setSelectedDogId] = useState('');
   const [selectedPackageId, setSelectedPackageId] = useState('');
   const [upiTransactionRef, setUpiTransactionRef] = useState('');
+  const [payLaterRequests, setPayLaterRequests] = useState<{ id: string; dog_id: string; status: string; created_at: string }[]>([]);
   const [assignedWalks, setAssignedWalks] = useState<AssignedWalk[]>([]);
   const [customerWalks, setCustomerWalks] = useState<CustomerWalk[]>([]);
   const [customerRoutePoints, setCustomerRoutePoints] = useState<RoutePoint[]>([]);
@@ -95,18 +96,20 @@ export default function App() {
   const loadCustomerData = useCallback(async () => {
     if (!supabase || !userId || profile?.role !== 'customer') return;
     setLoadingData(true); setError('');
-    const [dogResult, packageResult, subscriptionResult] = await Promise.all([
+    const [dogResult, packageResult, subscriptionResult, payLaterResult] = await Promise.all([
       supabase.from('dogs').select('id, name, breed, age_years, notes').eq('customer_id', userId).order('created_at', { ascending: false }),
       supabase.from('service_packages').select('id, walks_per_day, duration_minutes, monthly_price_inr').eq('active', true).order('walks_per_day'),
       supabase.from('dog_subscriptions').select('id, dog_id, walks_per_day, duration_minutes, monthly_price_inr, starts_on, ends_on, status').eq('customer_id', userId).order('created_at', { ascending: false }),
+      supabase.from('pay_later_requests').select('id, dog_id, status, created_at').eq('customer_id', userId).order('created_at', { ascending: false }),
     ]);
-    const failed = dogResult.error || packageResult.error || subscriptionResult.error;
+    const failed = dogResult.error || packageResult.error || subscriptionResult.error || payLaterResult.error;
     if (failed) setError('जानकारी load नहीं हुई: ' + failed.message);
     else {
       setDogs((dogResult.data ?? []) as Dog[]);
       if (!selectedDogId && dogResult.data?.length) setSelectedDogId(dogResult.data[0].id);
       setPackages((packageResult.data ?? []) as Package[]);
       setSubscriptions((subscriptionResult.data ?? []) as Subscription[]);
+      setPayLaterRequests((payLaterResult.data ?? []) as { id: string; dog_id: string; status: string; created_at: string }[]);
     }
     setLoadingData(false);
   }, [userId, profile?.role, selectedDogId]);
@@ -275,6 +278,25 @@ export default function App() {
     setBusy(false);
   }
 
+  async function submitPayLaterRequest() {
+    if (!supabase || !selectedDogId || !selectedPackageId) {
+      setError('पहले dog और package चुनें।');
+      return;
+    }
+    setBusy(true); setError(''); setMessage('');
+    const { error: requestError } = await supabase.rpc('customer_submit_pay_later_request', {
+      p_dog_id: selectedDogId,
+      p_package_id: selectedPackageId,
+    });
+    if (requestError) setError('Pay Later request submit नहीं हुई: ' + requestError.message);
+    else {
+      setSelectedPackageId('');
+      setMessage('Pay Later request Admin को भेज दी गई है। Approval मिलने के बाद ही package शुरू होगा; बकाया आपके account में जुड़ेगा।');
+      await loadCustomerData();
+    }
+    setBusy(false);
+  }
+
   async function submitPackagePayment() {
     if (!supabase || !selectedDogId || !selectedPackageId) {
       setError('पहले dog और package चुनें।');
@@ -417,7 +439,12 @@ export default function App() {
                 <View style={{ alignItems: 'flex-end' }}><Text style={styles.packagePrice}>{money(item.monthly_price_inr)}</Text><Text style={styles.packageHint}>per month</Text></View>
               </Pressable>)}
               {selectedPackage ? <View style={styles.paymentPanel}>
-                <Text style={styles.sectionTitle}>Pay with PhonePe / UPI</Text>
+                <Text style={styles.sectionTitle}>Choose payment method</Text>
+                <Pressable style={[styles.primaryButton, busy && styles.disabled]} onPress={() => void submitPayLaterRequest()} disabled={busy || !selectedDogId}>
+                  {busy ? <ActivityIndicator color="#fff" /> : <Text style={styles.primaryText}>Pay Later · Admin approval required</Text>}
+                </Pressable>
+                <Text style={styles.footnote}>अभी payment किए बिना request भेजें। Admin approve करेगा तभी package active होगा और monthly amount आपके बकाया में जुड़ेगा।</Text>
+                <Text style={styles.sectionTitle}>या अभी UPI से भुगतान करें</Text>
                 <Text style={styles.body}>QR scan करें या नीचे दिए UPI ID पर {money(selectedPackage.monthly_price_inr)} भेजें। Payee name: Bapan Rajbanshi.</Text>
                 <Image source={{ uri: 'data:image/png;base64,' + PHONEPE_QR_BASE64 }} style={styles.paymentQr} resizeMode="contain" />
                 <Text style={styles.upiId}>{DOJO_UPI_ID}</Text>
@@ -427,6 +454,7 @@ export default function App() {
                 <Pressable style={[styles.primaryButton, (busy || !selectedDogId) && styles.disabled]} onPress={() => void submitPackagePayment()} disabled={busy || !selectedDogId}>{busy ? <ActivityIndicator color="#fff" /> : <Text style={styles.primaryText}>Submit Payment Details</Text>}</Pressable>
                 <Text style={styles.footnote}>Payment तभी submit करें जब PhonePe में transaction successful दिखे। Package Admin verification के बाद ही चालू होगा।</Text>
               </View> : null}
+              {payLaterRequests.length > 0 ? <View style={styles.notice}><Text style={styles.noticeTitle}>Pay Later requests</Text>{payLaterRequests.slice(0,5).map((request) => <Text key={request.id} style={styles.noticeBody}>{dogs.find((dog) => dog.id === request.dog_id)?.name || 'Dog'} · {request.status === 'pending' ? 'Admin approval pending' : request.status === 'approved' ? 'Approved' : 'Rejected'} · {new Date(request.created_at).toLocaleDateString('en-IN')}</Text>)}</View> : null}
               <View style={styles.notice}><Text style={styles.noticeTitle}>Payment verification</Text><Text style={styles.noticeBody}>आपका payment reference Admin verify करेगा। App payment को अपने-आप successful नहीं मानेगा।</Text></View>
               <Pressable style={styles.textButton} onPress={() => void loadCustomerData()}><Text style={styles.textButtonLabel}>↻ Refresh my details</Text></Pressable>
             </> : profile.role === 'walker' ? <>
