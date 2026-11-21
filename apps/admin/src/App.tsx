@@ -61,7 +61,6 @@ export default function App() {
   const [creditEntries, setCreditEntries] = useState<CreditEntry[]>([]);
   const [trustedEnabled, setTrustedEnabled] = useState(false);
   const [creditLimit, setCreditLimit] = useState('0');
-  const [customPrice, setCustomPrice] = useState('');
   const [creditNote, setCreditNote] = useState('');
   const [ledgerType, setLedgerType] = useState<'charge' | 'payment'>('charge');
   const [ledgerAmount, setLedgerAmount] = useState('');
@@ -194,7 +193,6 @@ export default function App() {
     if (customer) {
       setTrustedEnabled(customer.is_trusted);
       setCreditLimit(String(customer.credit_limit_inr));
-      setCustomPrice(customer.custom_monthly_price_inr == null ? '' : String(customer.custom_monthly_price_inr));
       setCreditNote(customer.admin_note ?? '');
     }
     void supabase.from('customer_credit_ledger')
@@ -215,7 +213,6 @@ export default function App() {
       p_customer_id: selectedCreditCustomer,
       p_is_trusted: trustedEnabled,
       p_credit_limit_inr: Number(creditLimit || 0),
-      p_custom_monthly_price_inr: customPrice.trim() ? Number(customPrice) : null,
       p_admin_note: creditNote,
     });
     if (saveError) setCreditMessage('Save नहीं हुआ: ' + saveError.message);
@@ -354,7 +351,6 @@ export default function App() {
               {selectedCreditCustomer ? <>
                 <label className="check-line"><input type="checkbox" checked={trustedEnabled} onChange={(e) => setTrustedEnabled(e.target.checked)} /> Enable Pay Later for this customer</label>
                 <label>Credit limit (₹, 0 = no limit)<input type="number" min="0" value={creditLimit} onChange={(e) => setCreditLimit(e.target.value)} /></label>
-                <label>Custom monthly price (₹, optional)<input type="number" min="0" value={customPrice} onChange={(e) => setCustomPrice(e.target.value)} placeholder="Standard price if blank" /></label>
                 <label>Admin note<input value={creditNote} onChange={(e) => setCreditNote(e.target.value)} placeholder="e.g. Trusted long-time customer" /></label>
                 <button className="refresh" disabled={creditBusy} onClick={() => void saveCreditAccount()}>{creditBusy ? 'Saving…' : 'Save trusted settings'}</button>
               </> : null}
@@ -369,6 +365,7 @@ export default function App() {
             </div>
           </div>
           {creditMessage && <p className="notice">{creditMessage}</p>}
+          <h4>Outstanding balance: {money(creditEntries.reduce((balance, entry) => balance + (entry.entry_type === 'charge' ? entry.amount_inr : entry.entry_type === 'payment' ? -entry.amount_inr : 0), 0))}</h4>
           <h4>Recent ledger entries</h4>
           {creditEntries.length === 0 ? <p className="empty">इस customer का ledger अभी खाली है।</p> : <div className="table-wrap"><table><thead><tr><th>Date</th><th>Type</th><th>Amount</th><th>Description</th></tr></thead><tbody>{creditEntries.map((entry) => <tr key={entry.id}><td>{dateTime(entry.recorded_at)}</td><td>{entry.entry_type === 'charge' ? 'Due added' : entry.entry_type === 'payment' ? 'Payment received' : 'Adjustment'}</td><td>{money(entry.amount_inr)}</td><td>{entry.description}</td></tr>)}</tbody></table></div>}
         </section>
