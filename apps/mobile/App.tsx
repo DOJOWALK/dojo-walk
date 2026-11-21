@@ -383,9 +383,10 @@ export default function App() {
               </View>}
               {loadingData ? <ActivityIndicator color="#F07824" style={{ margin: 20 }} /> : dogs.length === 0 ? <View style={styles.empty}><Text style={styles.emptyTitle}>अभी कोई dog profile नहीं है</Text><Text style={styles.body}>पहले अपने dog की जानकारी जोड़ें। उसके बाद package request की जा सकेगी।</Text></View> : dogs.map((dog) => {
                 const active = subscriptions.find((sub) => sub.dog_id === dog.id && sub.status === 'active');
+                const pending = subscriptions.find((sub) => sub.dog_id === dog.id && sub.status === 'pending_payment');
                 return <View style={styles.dogCard} key={dog.id}>
                   <View style={styles.dogAvatar}><Text style={styles.dogAvatarText}>{dog.name.slice(0, 1).toUpperCase()}</Text></View>
-                  <View style={{ flex: 1 }}><Text style={styles.dogName}>{dog.name}</Text><Text style={styles.dogMeta}>{[dog.breed, dog.age_years !== null ? dog.age_years + ' years' : null].filter(Boolean).join(' · ') || 'Breed and age not added'}</Text><Text style={styles.dogStatus}>{active ? 'Active package · ' + money(active.monthly_price_inr) + '/month' : 'No active package yet'}</Text></View>
+                  <View style={{ flex: 1 }}><Text style={styles.dogName}>{dog.name}</Text><Text style={styles.dogMeta}>{[dog.breed, dog.age_years !== null ? dog.age_years + ' years' : null].filter(Boolean).join(' · ') || 'Breed and age not added'}</Text><Text style={styles.dogStatus}>{active ? 'Active package · ' + money(active.monthly_price_inr) + '/month' : pending ? 'Payment submitted · awaiting Admin verification' : 'No active package yet'}</Text></View>
                 </View>;
               })}
               <View style={styles.sectionHeader}><View><Text style={styles.sectionTitle}>Walk Tracking & History</Text><Text style={styles.sectionHint}>Active walk की latest location और completed route points</Text></View><Pressable style={styles.smallPrimary} onPress={() => void loadCustomerWalks()}><Text style={styles.smallPrimaryText}>Refresh</Text></Pressable></View>
