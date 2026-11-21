@@ -22,11 +22,19 @@ const DOJO_UPI_ID = '9625813987-4@axl';
 
 TaskManager.defineTask(WALK_LOCATION_TASK, async ({ data, error }) => {
   if (error || !supabase) return;
-  const bookingId = globalThis.localStorage?.getItem('dojo_active_booking_id');
-  if (!bookingId) return;
   const { data: sessionData } = await supabase.auth.getSession();
   const walkerId = sessionData.session?.user.id;
   if (!walkerId) return;
+  // Resolve the active walk from the database. React Native has no browser localStorage,
+  // and the database enforces at most one active walk per walker.
+  const { data: activeBooking, error: bookingError } = await supabase
+    .from('bookings')
+    .select('id')
+    .eq('walker_id', walkerId)
+    .eq('status', 'in_progress')
+    .maybeSingle();
+  if (bookingError || !activeBooking) return;
+  const bookingId = activeBooking.id;
   const locations = (data as { locations?: Location.LocationObject[] } | undefined)?.locations ?? [];
   if (!locations.length) return;
   await supabase.from('walker_locations').insert(
@@ -213,7 +221,6 @@ export default function App() {
         ? await Location.requestBackgroundPermissionsAsync()
         : { granted: false };
       if (backgroundAvailable && backgroundPermission.granted) {
-        globalThis.localStorage?.setItem('dojo_active_booking_id', bookingId);
         await Location.startLocationUpdatesAsync(WALK_LOCATION_TASK, {
           accuracy: Location.Accuracy.Balanced,
           timeInterval: 5000,
@@ -269,7 +276,6 @@ export default function App() {
       if (await Location.hasStartedLocationUpdatesAsync(WALK_LOCATION_TASK)) {
         await Location.stopLocationUpdatesAsync(WALK_LOCATION_TASK);
       }
-      globalThis.localStorage?.removeItem('dojo_active_booking_id');
       setWalkReport('');
       setGpsMessage('');
       setMessage('Walk successfully complete हो गई।');
