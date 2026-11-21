@@ -37,6 +37,7 @@ The current screens are development scaffolding, not a production-ready or publi
 - UPI payments are manually verified by an administrator.
 - Customers see only their own dogs and walks; walkers see only assigned dogs.
 - Live GPS is shared only during an active walk; route history is available to authorized customer and admin accounts.
+- A walker can have only one in-progress walk at a time.
 
 ## Local development
 
