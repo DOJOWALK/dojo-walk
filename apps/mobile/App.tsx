@@ -354,7 +354,7 @@ export default function App() {
     else {
       const status = (data as { status?: string } | null)?.status;
       setMessage(status === 'pending_approval' ? 'Schedule change Admin approval के लिए भेज दिया गया है। Approval तक पुराना schedule चलता रहेगा।' : 'Weekly schedule save हो गया। Monday–Saturday की future walk bookings बनेंगी; Sunday off रहेगा।');
-      await loadCustomerData();
+      await Promise.all([loadCustomerData(), loadCustomerWalks()]);
     }
     setBusy(false);
   }
