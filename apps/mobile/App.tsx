@@ -9,7 +9,8 @@ import { isSupabaseConfigured, supabase } from './lib/supabase';
 type Profile = { role: 'customer' | 'walker' | 'admin'; full_name: string | null; phone: string | null };
 type Dog = { id: string; name: string; breed: string | null; age_years: number | null; notes: string | null };
 type Package = { id: string; walks_per_day: number; duration_minutes: number; monthly_price_inr: number };
-type Subscription = { id: string; dog_id: string; walks_per_day: number; duration_minutes: number; monthly_price_inr: number; starts_on: string; ends_on: string; status: string };\ntype AssignedWalk = { id: string; scheduled_at: string; duration_minutes: number; service_address: string; customer_notes: string | null; status: string; dog: { name: string; breed: string | null } | null };
+type Subscription = { id: string; dog_id: string; walks_per_day: number; duration_minutes: number; monthly_price_inr: number; starts_on: string; ends_on: string; status: string };
+type AssignedWalk = { id: string; scheduled_at: string; duration_minutes: number; service_address: string; customer_notes: string | null; status: string; dog: { name: string; breed: string | null } | null };
 
 function normalizeIndianPhone(value: string) {
   const digits = value.replace(/\D/g, '');
@@ -31,7 +32,8 @@ export default function App() {
   const [error, setError] = useState('');
   const [dogs, setDogs] = useState<Dog[]>([]);
   const [packages, setPackages] = useState<Package[]>([]);
-  const [subscriptions, setSubscriptions] = useState<Subscription[]>([]);\n  const [assignedWalks, setAssignedWalks] = useState<AssignedWalk[]>([]);
+  const [subscriptions, setSubscriptions] = useState<Subscription[]>([]);
+  const [assignedWalks, setAssignedWalks] = useState<AssignedWalk[]>([]);
   const [loadingData, setLoadingData] = useState(false);
   const [showDogForm, setShowDogForm] = useState(false);
   const [dogName, setDogName] = useState('');
@@ -97,7 +99,8 @@ export default function App() {
     return () => { alive = false; listener.subscription.unsubscribe(); };
   }, []);
 
-  useEffect(() => { if (profile?.role === 'customer' && userId) void loadCustomerData(); }, [profile?.role, userId, loadCustomerData]);\n  useEffect(() => { if (profile?.role === 'walker' && userId) void loadWalkerData(); }, [profile?.role, userId, loadWalkerData]);
+  useEffect(() => { if (profile?.role === 'customer' && userId) void loadCustomerData(); }, [profile?.role, userId, loadCustomerData]);
+  useEffect(() => { if (profile?.role === 'walker' && userId) void loadWalkerData(); }, [profile?.role, userId, loadWalkerData]);
 
 
 
