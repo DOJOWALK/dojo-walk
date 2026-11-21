@@ -5,6 +5,7 @@ type AdminProfile = { role: string };
 type WalkerAdmin = { id: string; service_areas: string[]; experience_years: number; verification_status: string; profile: { full_name: string | null; phone: string | null } | null };
 type AssignmentBooking = { id: string; scheduled_at: string; duration_minutes: number; service_address: string; status: string; walker_id: string | null; dog: { name: string } | null; customer: { full_name: string | null; phone: string | null } | null };
 type PricingRow = { id: string; duration_minutes: number; price_inr: number; is_active: boolean };
+type WalkerPayout = { id: string; walker_id: string; payout_month: string; gross_amount_inr: number; paid_amount_inr: number; status: string; walker: { profile: { full_name: string | null; phone: string | null } | null } | null };
 type Booking = {
   id: string;
   scheduled_at: string;
@@ -84,6 +85,7 @@ export default function App() {
   const [pricingRows, setPricingRows] = useState<PricingRow[]>([]);
   const [walkerSelections, setWalkerSelections] = useState<Record<string, string>>({});
   const [pricingInputs, setPricingInputs] = useState<Record<string, string>>({});
+  const [walkerPayouts, setWalkerPayouts] = useState<WalkerPayout[]>([]);
   const [operationsBusy, setOperationsBusy] = useState(false);
   const [operationsMessage, setOperationsMessage] = useState('');
 
@@ -213,7 +215,7 @@ export default function App() {
   const loadOperations = useCallback(async () => {
     if (!supabase) return;
     setOperationsBusy(true);
-    const [walkerResult, bookingResult, pricingResult] = await Promise.all([
+    const [walkerResult, bookingResult, pricingResult, payoutResult] = await Promise.all([
       supabase.from('walkers')
         .select('id,service_areas,experience_years,verification_status,profile:profiles!walkers_id_fkey(full_name,phone)')
         .order('created_at', { ascending: false }),
@@ -221,8 +223,11 @@ export default function App() {
         .select('id,scheduled_at,duration_minutes,service_address,status,walker_id,dog:dogs(name),customer:profiles!bookings_customer_id_fkey(full_name,phone)')
         .in('status', ['requested', 'assigned']).order('scheduled_at', { ascending: true }).limit(100),
       supabase.from('pricing').select('id,duration_minutes,price_inr,is_active').order('duration_minutes'),
+      supabase.from('walker_payouts')
+        .select('id,walker_id,payout_month,gross_amount_inr,paid_amount_inr,status,walker:walkers!walker_payouts_walker_id_fkey(profile:profiles!walkers_id_fkey(full_name,phone))')
+        .order('payout_month', { ascending: false }).limit(100),
     ]);
-    const failed = walkerResult.error || bookingResult.error || pricingResult.error;
+    const failed = walkerResult.error || bookingResult.error || pricingResult.error || payoutResult.error;
     if (failed) setOperationsMessage('Management data load नहीं हुआ: ' + failed.message);
     else {
       setWalkersAdmin((walkerResult.data ?? []) as unknown as WalkerAdmin[]);
@@ -230,6 +235,7 @@ export default function App() {
       const rows = (pricingResult.data ?? []) as PricingRow[];
       setPricingRows(rows);
       setPricingInputs(Object.fromEntries(rows.map((row) => [row.id, String(row.price_inr)])));
+      setWalkerPayouts((payoutResult.data ?? []) as unknown as WalkerPayout[]);
       setOperationsMessage('');
     }
     setOperationsBusy(false);
@@ -265,6 +271,31 @@ export default function App() {
     if (updateError) setOperationsMessage('Walk assign नहीं हुई: ' + updateError.message);
     else if (!data) setOperationsMessage('यह booking अब requested नहीं है। Refresh करके दोबारा देखें।');
     else setOperationsMessage('Walk selected walker को assign कर दी गई।');
+    await loadOperations();
+    setOperationsBusy(false);
+  }
+
+  async function recordWalkerPayout(payout: WalkerPayout) {
+    if (!supabase) return;
+    const due = Math.max(0, payout.gross_amount_inr - payout.paid_amount_inr);
+    if (due === 0) return;
+    const raw = window.prompt('Kitni salary/payout transfer ki? Remaining due: ₹' + due, String(due));
+    if (raw === null) return;
+    const amount = Number(raw);
+    if (!Number.isSafeInteger(amount) || amount <= 0 || amount > due) {
+      setOperationsMessage('Payout amount ₹1 से लेकर remaining due ₹' + due + ' तक होना चाहिए।');
+      return;
+    }
+    const paidTotal = payout.paid_amount_inr + amount;
+    setOperationsBusy(true); setOperationsMessage('');
+    const { error: payoutError } = await supabase.from('walker_payouts')
+      .update({
+        paid_amount_inr: paidTotal,
+        status: paidTotal >= payout.gross_amount_inr ? 'paid' : 'pending',
+        paid_at: paidTotal >= payout.gross_amount_inr ? new Date().toISOString() : null,
+      }).eq('id', payout.id);
+    if (payoutError) setOperationsMessage('Payout update नहीं हुआ: ' + payoutError.message);
+    else setOperationsMessage('Walker payout payment दर्ज हो गया।');
     await loadOperations();
     setOperationsBusy(false);
   }
@@ -504,6 +535,14 @@ export default function App() {
           <div className="credit-grid">{pricingRows.map((row) => <div className="credit-form" key={row.id}><h4>{row.duration_minutes} minute walk</h4><label>Price in INR<input type="number" min="1" step="1" value={pricingInputs[row.id] ?? ''} onChange={(event) => setPricingInputs((current) => ({ ...current, [row.id]: event.target.value }))} /></label><small>{row.price_inr > 0 && row.is_active ? 'Active price' : 'Not available to customers until a valid price is saved'}</small><button className="refresh" disabled={operationsBusy} onClick={() => void savePricing(row)}>Save {row.duration_minutes} min price</button></div>)}</div>
         </section>
         {operationsMessage && <p className="notice">{operationsMessage}</p>}
+        <section className="panel route-panel" id="payouts">
+          <div className="panel-heading"><div><h3>Walker monthly payouts</h3><p>Completed billable walks automatically add the 80% walker share to the India-local payout month.</p></div><button className="refresh" onClick={() => void loadOperations()} disabled={operationsBusy}>Refresh</button></div>
+          {walkerPayouts.length === 0 ? <p className="empty">अभी कोई completed billable walk payout generate नहीं हुआ है।</p> : <div className="table-wrap"><table><thead><tr><th>Walker</th><th>Month</th><th>Earned (80%)</th><th>Paid</th><th>Due</th><th>Status</th><th>Action</th></tr></thead><tbody>{walkerPayouts.map((payout) => {
+            const due = Math.max(0, payout.gross_amount_inr - payout.paid_amount_inr);
+            return <tr key={payout.id}><td>{payout.walker?.profile?.full_name || payout.walker?.profile?.phone || payout.walker_id.slice(0, 8)}</td><td>{new Date(payout.payout_month + 'T00:00:00').toLocaleDateString('en-IN', { month: 'short', year: 'numeric' })}</td><td>{money(payout.gross_amount_inr)}</td><td>{money(payout.paid_amount_inr)}</td><td>{money(due)}</td><td><span className={'pill ' + payout.status}>{payout.status}</span></td><td>{due > 0 ? <button className="refresh approve" disabled={operationsBusy} onClick={() => void recordWalkerPayout(payout)}>Record transfer</button> : 'Settled'}</td></tr>;
+          })}</tbody></table></div>}
+          <p className="notice inline-notice">Commission rule: 20% DOJO WALK / 80% Walker. Commission accrues only when a completed booking has a positive billable price_inr; subscription walks must be assigned a correct billable amount before payout is expected.</p>
+        </section>
         <section className="panel route-panel" id="trusted-customers">
           <div className="panel-heading"><div><h3>Trusted customers · Pay Later</h3><p>भरोसेमंद ग्राहक को अनुमति दें, बकाया जोड़ें और payment मिलने पर receipt दर्ज करें।</p></div></div>
           <div className="credit-grid">
