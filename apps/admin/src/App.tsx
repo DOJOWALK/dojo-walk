@@ -31,6 +31,7 @@ type PayLaterRequest = {
   dog: { name: string } | null;
   package: { walks_per_day: number; duration_minutes: number; monthly_price_inr: number } | null;
 };
+type BookingChangeRequest = { id: string; booking_id: string; customer_id: string; proposed_scheduled_at: string | null; proposed_service_address: string | null; proposed_latitude: number | null; proposed_longitude: number | null; proposed_service_slot: string | null; customer_note: string | null; status: string; admin_note: string | null; created_at: string; booking: { scheduled_at: string; service_address: string; service_slot: string | null; status: string; dog: { name: string } | null } | null; customer: { full_name: string | null; phone: string | null } | null };
 type PendingPayment = {
   id: string;
   amount_inr: number;
@@ -88,6 +89,7 @@ export default function App() {
   const [pricingInputs, setPricingInputs] = useState<Record<string, string>>({});
   const [walkerPayouts, setWalkerPayouts] = useState<WalkerPayout[]>([]);
   const [adminCustomers, setAdminCustomers] = useState<AdminCustomer[]>([]);
+  const [bookingChangeRequests, setBookingChangeRequests] = useState<BookingChangeRequest[]>([]);
   const [operationsBusy, setOperationsBusy] = useState(false);
   const [operationsMessage, setOperationsMessage] = useState('');
 
@@ -217,7 +219,7 @@ export default function App() {
   const loadOperations = useCallback(async () => {
     if (!supabase) return;
     setOperationsBusy(true);
-    const [walkerResult, bookingResult, pricingResult, payoutResult, customerResult] = await Promise.all([
+    const [walkerResult, bookingResult, pricingResult, payoutResult, customerResult, changeRequestResult] = await Promise.all([
       supabase.from('walkers')
         .select('id,service_areas,experience_years,verification_status,profile:profiles!walkers_id_fkey(full_name,phone)')
         .order('created_at', { ascending: false }),
@@ -231,8 +233,11 @@ export default function App() {
       supabase.from('profiles')
         .select('id,full_name,phone,dogs:dogs!dogs_customer_id_fkey(id,name,breed,age_years)')
         .eq('role', 'customer').order('full_name'),
+      supabase.from('booking_change_requests')
+        .select('id,booking_id,customer_id,proposed_scheduled_at,proposed_service_address,proposed_latitude,proposed_longitude,proposed_service_slot,customer_note,status,admin_note,created_at,booking:bookings!booking_change_requests_booking_id_fkey(scheduled_at,service_address,service_slot,status,dog:dogs(name)),customer:profiles!booking_change_requests_customer_id_fkey(full_name,phone)')
+        .in('status', ['pending','needs_info','approved']).order('created_at', { ascending: true }).limit(100),
     ]);
-    const failed = walkerResult.error || bookingResult.error || pricingResult.error || payoutResult.error || customerResult.error;
+    const failed = walkerResult.error || bookingResult.error || pricingResult.error || payoutResult.error || customerResult.error || changeRequestResult.error;
     if (failed) setOperationsMessage('Management data load नहीं हुआ: ' + failed.message);
     else {
       setWalkersAdmin((walkerResult.data ?? []) as unknown as WalkerAdmin[]);
@@ -242,6 +247,7 @@ export default function App() {
       setPricingInputs(Object.fromEntries(rows.map((row) => [row.id, String(row.price_inr)])));
       setWalkerPayouts((payoutResult.data ?? []) as unknown as WalkerPayout[]);
       setAdminCustomers((customerResult.data ?? []) as unknown as AdminCustomer[]);
+      setBookingChangeRequests((changeRequestResult.data ?? []) as unknown as BookingChangeRequest[]);
       setOperationsMessage('');
     }
     setOperationsBusy(false);
@@ -302,6 +308,20 @@ export default function App() {
       }).eq('id', payout.id);
     if (payoutError) setOperationsMessage('Payout update नहीं हुआ: ' + payoutError.message);
     else setOperationsMessage('Walker payout payment दर्ज हो गया।');
+    await loadOperations();
+    setOperationsBusy(false);
+  }
+
+  async function reviewBookingChange(requestId: string, decision: 'approve' | 'reject' | 'needs_info' | 'resolve') {
+    if (!supabase) return;
+    const note = decision === 'reject' || decision === 'needs_info' ? window.prompt(decision === 'reject' ? 'Reject karne ka reason:' : 'Customer se kaunsi detail chahiye?') : null;
+    if ((decision === 'reject' || decision === 'needs_info') && (!note || note.trim().length < 3)) return;
+    setOperationsBusy(true); setOperationsMessage('');
+    const { error: reviewError } = await supabase.rpc('admin_review_booking_change_request', {
+      p_request_id: requestId, p_decision: decision, p_admin_note: note,
+    });
+    if (reviewError) setOperationsMessage('Change request update nahi hui: ' + reviewError.message);
+    else setOperationsMessage(decision === 'approve' ? 'Change approve karke booking par apply kar diya.' : decision === 'resolve' ? 'Request resolved mark ho gayi.' : decision === 'reject' ? 'Change request reject ho gayi.' : 'Customer se clarification maang li gayi.');
     await loadOperations();
     setOperationsBusy(false);
   }
@@ -534,6 +554,10 @@ export default function App() {
         <section className="panel route-panel" id="walkers">
           <div className="panel-heading"><div><h3>Walker management</h3><p>New walker accounts stay pending until Admin approval.</p></div><button className="refresh" onClick={() => void loadOperations()} disabled={operationsBusy}>Refresh</button></div>
           {walkersAdmin.length === 0 ? <p className="empty">अभी कोई walker account नहीं है।</p> : <div className="table-wrap"><table><thead><tr><th>Walker</th><th>Phone</th><th>Experience</th><th>Status</th><th>Action</th></tr></thead><tbody>{walkersAdmin.map((walker) => <tr key={walker.id}><td>{walker.profile?.full_name || walker.id.slice(0, 8)}</td><td>{walker.profile?.phone || '—'}</td><td>{walker.experience_years} years</td><td><span className={'pill ' + walker.verification_status}>{walker.verification_status}</span></td><td>{walker.verification_status === 'pending' ? <div className="payment-actions"><button className="refresh approve" disabled={operationsBusy} onClick={() => void reviewWalker(walker.id, 'approved')}>Approve</button><button className="refresh reject" disabled={operationsBusy} onClick={() => void reviewWalker(walker.id, 'rejected')}>Reject</button></div> : walker.verification_status === 'approved' ? <span className="subtle-count">Eligible for assignment</span> : '—'}</td></tr>)}</tbody></table></div>}
+        </section>
+        <section className="panel route-panel" id="change-requests">
+          <div className="panel-heading"><div><h3>Customer change requests</h3><p>Time, morning/evening slot, address ya map pin change Admin approval ke baad hi apply hoga.</p></div><span className="subtle-count">{bookingChangeRequests.length} open</span></div>
+          {bookingChangeRequests.length === 0 ? <p className="empty">Koi open change request nahi hai.</p> : <div className="payment-list">{bookingChangeRequests.map((request) => <div className="payment-row payment-review-row" key={request.id}><div><strong>{request.booking?.dog?.name || 'Dog'} · {request.status}</strong><small>{request.customer?.full_name || 'Customer'} {request.customer?.phone ? '· ' + request.customer.phone : ''}</small><small>Current: {dateTime(request.booking?.scheduled_at || request.created_at)} · {request.booking?.service_slot || 'slot not set'} · {request.booking?.service_address || 'address missing'}</small>{request.proposed_scheduled_at ? <small>Requested time: {dateTime(request.proposed_scheduled_at)} · {request.proposed_service_slot || 'slot unchanged'}</small> : null}{request.proposed_service_address ? <small>New address: {request.proposed_service_address}</small> : null}{request.proposed_latitude !== null && request.proposed_longitude !== null ? <small>New map pin: {request.proposed_latitude.toFixed(5)}, {request.proposed_longitude.toFixed(5)}</small> : null}{request.customer_note ? <small>Customer note: {request.customer_note}</small> : null}{request.admin_note ? <small>Admin note: {request.admin_note}</small> : null}<div className="payment-actions">{request.status === 'pending' || request.status === 'needs_info' ? <><button className="refresh approve" disabled={operationsBusy} onClick={() => void reviewBookingChange(request.id, 'approve')}>Approve & apply</button><button className="refresh" disabled={operationsBusy} onClick={() => void reviewBookingChange(request.id, 'needs_info')}>Need info</button><button className="refresh reject" disabled={operationsBusy} onClick={() => void reviewBookingChange(request.id, 'reject')}>Reject</button></> : <button className="refresh approve" disabled={operationsBusy} onClick={() => void reviewBookingChange(request.id, 'resolve')}>Mark resolved</button>}</div></div><span className={'pill ' + request.status}>{request.status}</span></div>)}</div>}
         </section>
         <section className="panel route-panel" id="assignments">
           <div className="panel-heading"><div><h3>Walk assignment</h3><p>Assign each requested walk to one approved walker.</p></div></div>
