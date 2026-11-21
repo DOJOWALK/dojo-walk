@@ -15,8 +15,16 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-      - run: npm install
-      - run: npm run build:admin
+      - name: Show runtime versions
+        run: |
+          node --version
+          npm --version
+      - name: Install workspace dependencies
+        run: npm install --no-audit --no-fund --verbose
+      - name: Type-check Admin
+        run: npx tsc --noEmit -p apps/admin/tsconfig.json
+      - name: Build Admin
+        run: npm run build --workspace @dojowalk/admin
 
   mobile-export:
     name: Android JavaScript bundle export
@@ -26,7 +34,15 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-      - run: npm install
+      - name: Show runtime versions
+        run: |
+          node --version
+          npm --version
+      - name: Install workspace dependencies
+        run: npm install --no-audit --no-fund --verbose
+      - name: Type-check mobile
+        working-directory: apps/mobile
+        run: npx tsc --noEmit -p tsconfig.json
       - name: Export Android bundle
         working-directory: apps/mobile
         run: npx expo export --platform android --output-dir dist
