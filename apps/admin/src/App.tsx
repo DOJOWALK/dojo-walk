@@ -26,6 +26,8 @@ type PendingPayment = {
   upi_transaction_ref: string | null;
   submitted_at: string;
   status: string;
+  customer: { full_name: string | null; phone: string | null } | null;
+  subscription: { dog_id: string; dogs: { name: string } | null } | null;
 };
 
 const money = (amount: number) => new Intl.NumberFormat('en-IN', {
@@ -101,8 +103,8 @@ export default function App() {
         .select('id, scheduled_at, status, duration_minutes, service_type')
         .order('scheduled_at', { ascending: false }).limit(6),
       supabase.from('subscription_payments')
-        .select('id, amount_inr, upi_transaction_ref, submitted_at, status')
-        .eq('status', 'pending').order('submitted_at', { ascending: true }).limit(6),
+        .select('id, amount_inr, upi_transaction_ref, submitted_at, status, customer:profiles!subscription_payments_customer_id_fkey(full_name,phone), subscription:dog_subscriptions!inner(dog_id,dogs(name))')
+        .eq('status', 'pending').order('submitted_at', { ascending: true }).limit(30),
       supabase.from('bookings')
         .select('id, status, scheduled_at, actual_started_at, actual_ended_at, dog:dogs(name)')
         .in('status', ['in_progress', 'completed'])
@@ -252,6 +254,29 @@ export default function App() {
     return () => { void supabase?.removeChannel(channel); };
   }, [isAdmin, loadDashboard]);
 
+  async function reviewPayment(paymentId: string, decision: 'verified' | 'rejected') {
+    if (!supabase) return;
+    const note = window.prompt(decision === 'verified'
+      ? 'Optional admin note (UTR verified against your UPI statement):'
+      : 'Rejection reason (required):');
+    if (note === null) return;
+    if (decision === 'rejected' && note.trim().length < 3) {
+      setDashboardError('Reject करने के लिए कम से कम 3 अक्षर का कारण लिखें।');
+      return;
+    }
+    setDashboardLoading(true); setDashboardError('');
+    const { error: reviewError } = await supabase.rpc('admin_review_subscription_payment', {
+      p_payment_id: paymentId,
+      p_decision: decision,
+      p_admin_note: note.trim() || null,
+    });
+    if (reviewError) setDashboardError('Payment review नहीं हो पाया: ' + reviewError.message);
+    else setDashboardError(decision === 'verified'
+      ? 'Payment verified. Subscription आज से activate हो गया।'
+      : 'Payment rejected. Pending subscription cancel कर दिया गया।');
+    await loadDashboard();
+  }
+
   async function signIn(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!supabase) return;
@@ -333,8 +358,8 @@ export default function App() {
           </article>
           <article className="panel" id="payments">
             <div className="panel-heading"><div><h3>Pending UPI payments</h3><p>Admin verification required</p></div><span className="subtle-count">{metrics.pendingPayments} pending</span></div>
-            {payments.length === 0 ? <p className="empty">कोई pending payment नहीं है।</p> : <div className="payment-list">{payments.map((payment) => <div className="payment-row" key={payment.id}><div><strong>{money(payment.amount_inr)}</strong><small>Ref: {payment.upi_transaction_ref || 'Not entered'}</small><small>{dateTime(payment.submitted_at)}</small></div><span className="pill pending">Pending</span></div>)}</div>}
-            <p className="notice inline-notice">Payment केवल bank/UPI statement से जाँचकर ही verified करें। यह स्क्रीन अभी केवल pending entries दिखाती है।</p>
+            {payments.length === 0 ? <p className="empty">कोई pending payment नहीं है।</p> : <div className="payment-list">{payments.map((payment) => <div className="payment-row payment-review-row" key={payment.id}><div><strong>{money(payment.amount_inr)} · {payment.subscription?.dogs?.name || 'Dog not found'}</strong><small>{payment.customer?.full_name || 'Customer'} {payment.customer?.phone ? '· ' + payment.customer.phone : ''}</small><small>UTR: {payment.upi_transaction_ref || 'Not entered'}</small><small>{dateTime(payment.submitted_at)}</small><div className="payment-actions"><button className="refresh approve" onClick={() => void reviewPayment(payment.id, 'verified')}>Verify & activate</button><button className="refresh reject" onClick={() => void reviewPayment(payment.id, 'rejected')}>Reject</button></div></div><span className="pill pending">Pending</span></div>)}</div>}
+            <p className="notice inline-notice">हर UTR को अपने PhonePe / bank statement में मिलाने के बाद ही Verify करें। Verify करने पर subscription आज से active होगा। Reject करने पर pending subscription cancel होगा।</p>
           </article>
         </section>
         <section className="panel route-panel" id="trusted-customers">
