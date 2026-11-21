@@ -3,7 +3,7 @@ import { StatusBar } from 'expo-status-bar';
 import * as Location from 'expo-location';
 import * as TaskManager from 'expo-task-manager';
 import {
-  ActivityIndicator, KeyboardAvoidingView, Platform, Pressable,
+  ActivityIndicator, KeyboardAvoidingView, Linking, Platform, Pressable,
   ScrollView, StyleSheet, Text, TextInput, View,
 } from 'react-native';
 import { isSupabaseConfigured, supabase } from './lib/supabase';
@@ -12,6 +12,8 @@ type Profile = { role: 'customer' | 'walker' | 'admin'; full_name: string | null
 type Dog = { id: string; name: string; breed: string | null; age_years: number | null; notes: string | null };
 type Package = { id: string; walks_per_day: number; duration_minutes: number; monthly_price_inr: number };
 type Subscription = { id: string; dog_id: string; walks_per_day: number; duration_minutes: number; monthly_price_inr: number; starts_on: string; ends_on: string; status: string };
+type CustomerWalk = { id: string; scheduled_at: string; status: string; actual_started_at: string | null; actual_ended_at: string | null; actual_duration_minutes: number | null; walk_report: string | null; dog: { name: string } | null };
+type RoutePoint = { id: number; booking_id: string; latitude: number; longitude: number; recorded_at: string };
 type AssignedWalk = { id: string; scheduled_at: string; duration_minutes: number; service_address: string; customer_notes: string | null; status: string; actual_started_at: string | null; actual_ended_at: string | null; actual_duration_minutes: number | null; walk_report: string | null; dog: { name: string; breed: string | null } | null };
 
 const WALK_LOCATION_TASK = 'dojo-walk-active-route';
@@ -58,6 +60,8 @@ export default function App() {
   const [packages, setPackages] = useState<Package[]>([]);
   const [subscriptions, setSubscriptions] = useState<Subscription[]>([]);
   const [assignedWalks, setAssignedWalks] = useState<AssignedWalk[]>([]);
+  const [customerWalks, setCustomerWalks] = useState<CustomerWalk[]>([]);
+  const [customerRoutePoints, setCustomerRoutePoints] = useState<RoutePoint[]>([]);
   const [loadingData, setLoadingData] = useState(false);
   const [showDogForm, setShowDogForm] = useState(false);
   const [dogName, setDogName] = useState('');
@@ -101,6 +105,24 @@ export default function App() {
     setLoadingData(false);
   }, [userId, profile?.role]);
 
+  const loadCustomerWalks = useCallback(async () => {
+    if (!supabase || !userId || profile?.role !== 'customer') return;
+    const { data: bookings, error: bookingError } = await supabase.from('bookings')
+      .select('id, scheduled_at, status, actual_started_at, actual_ended_at, actual_duration_minutes, walk_report, dog:dogs(name)')
+      .eq('customer_id', userId).in('status', ['in_progress', 'completed'])
+      .order('scheduled_at', { ascending: false }).limit(20);
+    if (bookingError) { setError('Walk history load नहीं हुई: ' + bookingError.message); return; }
+    const rows = (bookings ?? []) as unknown as CustomerWalk[];
+    setCustomerWalks(rows);
+    const ids = rows.map((item) => item.id);
+    if (!ids.length) { setCustomerRoutePoints([]); return; }
+    const { data: points, error: pointError } = await supabase.from('walker_locations')
+      .select('id, booking_id, latitude, longitude, recorded_at')
+      .in('booking_id', ids).order('recorded_at', { ascending: true });
+    if (pointError) setError('GPS route load नहीं हुई: ' + pointError.message);
+    else setCustomerRoutePoints((points ?? []) as RoutePoint[]);
+  }, [userId, profile?.role]);
+
   const loadWalkerData = useCallback(async () => {
     if (!supabase || !userId || profile?.role !== 'walker') return;
     setLoadingData(true); setError('');
@@ -121,12 +143,20 @@ export default function App() {
     const { data: listener } = supabase.auth.onAuthStateChange((_event, session) => {
       if (!alive) return;
       if (session) setTimeout(() => { if (alive) void loadProfile(session.user.id); }, 0);
-      else { setProfile(null); setUserId(''); setDogs([]); setSubscriptions([]); }
+      else { setProfile(null); setUserId(''); setDogs([]); setSubscriptions([]); setCustomerWalks([]); setCustomerRoutePoints([]); }
     });
     return () => { alive = false; listener.subscription.unsubscribe(); };
   }, []);
 
-  useEffect(() => { if (profile?.role === 'customer' && userId) void loadCustomerData(); }, [profile?.role, userId, loadCustomerData]);
+  useEffect(() => { if (profile?.role === 'customer' && userId) { void loadCustomerData(); void loadCustomerWalks(); } }, [profile?.role, userId, loadCustomerData, loadCustomerWalks]);
+  useEffect(() => {
+    if (!supabase || profile?.role !== 'customer' || !userId) return;
+    const channel = supabase.channel('customer-walk-routes-' + userId)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'walker_locations' }, () => { void loadCustomerWalks(); })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'bookings', filter: 'customer_id=eq.' + userId }, () => { void loadCustomerWalks(); })
+      .subscribe();
+    return () => { void supabase?.removeChannel(channel); };
+  }, [profile?.role, userId, loadCustomerWalks]);
   useEffect(() => { if (profile?.role === 'walker' && userId) void loadWalkerData(); }, [profile?.role, userId, loadWalkerData]);
 
 
@@ -320,6 +350,24 @@ export default function App() {
                 return <View style={styles.dogCard} key={dog.id}>
                   <View style={styles.dogAvatar}><Text style={styles.dogAvatarText}>{dog.name.slice(0, 1).toUpperCase()}</Text></View>
                   <View style={{ flex: 1 }}><Text style={styles.dogName}>{dog.name}</Text><Text style={styles.dogMeta}>{[dog.breed, dog.age_years !== null ? dog.age_years + ' years' : null].filter(Boolean).join(' · ') || 'Breed and age not added'}</Text><Text style={styles.dogStatus}>{active ? 'Active package · ' + money(active.monthly_price_inr) + '/month' : 'No active package yet'}</Text></View>
+                </View>;
+              })}
+              <View style={styles.sectionHeader}><View><Text style={styles.sectionTitle}>Walk Tracking & History</Text><Text style={styles.sectionHint}>Active walk की latest location और completed route points</Text></View><Pressable style={styles.smallPrimary} onPress={() => void loadCustomerWalks()}><Text style={styles.smallPrimaryText}>Refresh</Text></Pressable></View>
+              {customerWalks.length === 0 ? <View style={styles.empty}><Text style={styles.emptyTitle}>अभी कोई active या completed walk नहीं है</Text><Text style={styles.body}>Walk शुरू होने के बाद location और route यहाँ दिखाई देंगे।</Text></View> : customerWalks.map((walk) => {
+                const points = customerRoutePoints.filter((point) => point.booking_id === walk.id);
+                const latest = points[points.length - 1];
+                const first = points[0];
+                const mapUrl = latest ? 'https://www.openstreetmap.org/?mlat=' + latest.latitude + '&mlon=' + latest.longitude + '#map=17/' + latest.latitude + '/' + latest.longitude : '';
+                return <View style={styles.dogCard} key={walk.id}>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.dogName}>{walk.dog?.name || 'Dog walk'} · {walk.status === 'in_progress' ? 'Live walk' : 'Completed'}</Text>
+                    <Text style={styles.dogMeta}>{new Date(walk.scheduled_at).toLocaleString('en-IN', { dateStyle: 'medium', timeStyle: 'short' })}</Text>
+                    <Text style={styles.dogMeta}>{points.length} GPS points recorded</Text>
+                    {walk.actual_duration_minutes ? <Text style={styles.dogMeta}>Duration: {walk.actual_duration_minutes} minutes</Text> : null}
+                    {walk.walk_report ? <Text style={styles.dogMeta}>Walker report: {walk.walk_report}</Text> : null}
+                    {latest ? <><Text style={styles.dogMeta}>Latest GPS: {latest.latitude.toFixed(5)}, {latest.longitude.toFixed(5)}</Text><Pressable style={styles.textButton} onPress={() => void Linking.openURL(mapUrl)}><Text style={styles.textButtonLabel}>Open latest location in map ↗</Text></Pressable></> : <Text style={styles.dogMeta}>GPS location अभी उपलब्ध नहीं है।</Text>}
+                    {first && latest && points.length > 1 ? <Text style={styles.dogMeta}>Route range: {first.latitude.toFixed(5)}, {first.longitude.toFixed(5)} → {latest.latitude.toFixed(5)}, {latest.longitude.toFixed(5)}</Text> : null}
+                  </View>
                 </View>;
               })}
               <View style={styles.sectionHeader}><View><Text style={styles.sectionTitle}>Monthly Packages</Text><Text style={styles.sectionHint}>Monday–Saturday · प्रति dog अलग package</Text></View></View>
