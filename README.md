@@ -8,11 +8,21 @@ DOJO WALK is a dog-walking service platform for customers, walkers, and administ
 
 - `apps/mobile` — Expo / React Native app for Android and iOS.
 - `apps/admin` — React web dashboard for administrators.
-- `supabase` — database migrations, policies, and configuration (to be added in the next setup phase).
+- `supabase` — database setup notes and migration files.
 
-## Current setup
+## Current development status
 
-This repository contains the initial project scaffold. The mobile app, admin dashboard, authentication screens, GPS tracking, and payment workflows are not yet production-ready.
+- [x] Project scaffold for mobile and admin web apps.
+- [x] Supabase client configuration templates.
+- [x] Admin email/password sign-in with a database role check.
+- [x] Admin overview connected to read-only database counts, recent walks, and pending UPI payment entries.
+- [x] Mobile phone OTP sign-in screens for customer and walker accounts.
+- [ ] Customer dog, subscription, and booking screens.
+- [ ] Walker assigned-dog, start/stop walk, GPS, and report screens.
+- [ ] Admin payment verification, walker assignment, pricing, and payout management.
+- [ ] End-to-end testing and Android/iOS release builds.
+
+The current screens are development scaffolding, not a production-ready or published app. Payment approval and walk operations are not yet enabled from the UI.
 
 ## Business rules captured for implementation
 
@@ -26,8 +36,22 @@ This repository contains the initial project scaffold. The mobile app, admin das
 
 ## Local development
 
-Install Node.js LTS, then install dependencies from the relevant app folder. Setup instructions will be expanded as each app is implemented.
+1. Install a current Node.js LTS release.
+2. From the repository root, run `npm install`.
+3. Copy `apps/admin/.env.example` to `apps/admin/.env` and set:
+   - `VITE_SUPABASE_URL`
+   - `VITE_SUPABASE_PUBLISHABLE_KEY`
+4. Copy `apps/mobile/.env.example` to `apps/mobile/.env` and set:
+   - `EXPO_PUBLIC_SUPABASE_URL`
+   - `EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY`
+5. Run `npm run dev:admin` for the admin web app or `npm run dev:mobile` for Expo.
+
+Use the Supabase **publishable key** in client apps. Never use a service-role or secret key in a mobile app, browser app, or committed file.
+
+## Phone OTP setup
+
+The mobile login uses Supabase phone OTP. Before SMS login can work, enable Phone authentication in Supabase Auth and configure a supported SMS provider. Customer sign-in can create a customer account; walker accounts should be created and assigned the walker role by an administrator. A successful OTP alone does not grant walker access—the app checks the profile role.
 
 ## Security
 
-Never commit Supabase service-role keys, passwords, OTPs, or other secrets. Client apps must use only publishable/anon credentials with Row Level Security enabled.
+Never commit Supabase service-role keys, passwords, OTPs, or other secrets. Client apps use publishable credentials and depend on Row Level Security for data access. Test all RLS policies with separate customer, walker, and admin accounts before launch.
