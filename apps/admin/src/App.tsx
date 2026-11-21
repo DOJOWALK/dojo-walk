@@ -518,7 +518,7 @@ export default function App() {
       <aside className="sidebar">
         <div className="brand"><span className="brand-mark">DW</span><span>DOJO WALK</span></div>
         <p className="side-label">WORKSPACE</p>
-        <nav><a className="active" href="#overview">Overview</a><a href="#walks">Walks</a><a href="#payments">Payments</a><a href="#pay-later-requests">Pay Later approvals</a><a href="#dogs">Dogs & customers</a><a href="#walkers">Walkers</a><a href="#change-requests">Change requests</a><a href="#assignments">Walk assignment</a><a href="#pricing">Pricing</a><a href="#payouts">Walker payouts</a><a href="#trusted-customers">Trusted customers</a></nav>
+        <nav><a className="active" href="#overview">Overview</a><a href="#walks">Walks</a><a href="#payments">Payments</a><a href="#pay-later-requests">Pay Later approvals</a><a href="#dogs">Dogs & customers</a><a href="#walkers">Walkers</a><a href="#weekly-schedule-requests">Weekly schedule requests</a><a href="#change-requests">Change requests</a><a href="#assignments">Walk assignment</a><a href="#pricing">Pricing</a><a href="#payouts">Walker payouts</a><a href="#trusted-customers">Trusted customers</a></nav>
         <div className="sidebar-foot">WALK. CARE. TRUST.</div>
       </aside>
       <section className="content" id="overview">
