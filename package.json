@@ -2,10 +2,7 @@
   "name": "dojo-walk",
   "version": "1.0.0",
   "private": true,
-  "workspaces": [
-    "apps/mobile",
-    "apps/admin"
-  ],
+  "workspaces": ["apps/mobile", "apps/admin"],
   "scripts": {
     "dev:mobile": "npm run start --workspace @dojowalk/mobile",
     "dev:admin": "npm run dev --workspace @dojowalk/admin",
