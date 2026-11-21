@@ -332,13 +332,14 @@ export default function App() {
       return;
     }
     setBusy(true); setError(''); setMessage('');
-    const { error: bookingError } = await supabase.rpc('customer_request_subscription_walk_with_location', {
+    const { error: bookingError } = await supabase.rpc('customer_request_subscription_walk_with_slot', {
       p_dog_id: selectedDogId,
       p_scheduled_at: scheduled.toISOString(),
       p_service_address: bookingAddress.trim(),
       p_customer_notes: bookingNotes.trim() || null,
       p_latitude: bookingLatitude,
       p_longitude: bookingLongitude,
+      p_service_slot: bookingSlot,
     });
     if (bookingError) setError('Walk request नहीं बनी: ' + bookingError.message);
     else {
