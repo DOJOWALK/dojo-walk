@@ -83,6 +83,10 @@ begin
     raise exception 'Enter the UPI transaction reference after successful payment';
   end if;
 
+  -- Serialize Sunday submissions using the same normalized reference.
+  -- The unique index below remains the final guard within booking_payments.
+  perform pg_advisory_xact_lock(hashtextextended(lower(btrim(p_upi_transaction_ref)), 0));
+
   select price_inr into v_price from public.pricing
   where duration_minutes = p_duration_minutes and is_active = true and price_inr > 0
   for share;
