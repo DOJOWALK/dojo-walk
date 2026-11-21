@@ -72,6 +72,17 @@ export default function App() {
     setLoadingData(false);
   }, [userId, profile?.role]);
 
+  const loadWalkerData = useCallback(async () => {
+    if (!supabase || !userId || profile?.role !== 'walker') return;
+    setLoadingData(true); setError('');
+    const { data, error: queryError } = await supabase.from('bookings')
+      .select('id, scheduled_at, duration_minutes, service_address, customer_notes, status, dog:dogs(name, breed)')
+      .eq('walker_id', userId).order('scheduled_at', { ascending: true }).limit(50);
+    if (queryError) setError('Assigned walks load नहीं हुए: ' + queryError.message);
+    else setAssignedWalks((data ?? []) as unknown as AssignedWalk[]);
+    setLoadingData(false);
+  }, [userId, profile?.role]);
+
   useEffect(() => {
     if (!supabase) return;
     let alive = true;
@@ -88,16 +99,7 @@ export default function App() {
 
   useEffect(() => { if (profile?.role === 'customer' && userId) void loadCustomerData(); }, [profile?.role, userId, loadCustomerData]);\n  useEffect(() => { if (profile?.role === 'walker' && userId) void loadWalkerData(); }, [profile?.role, userId, loadWalkerData]);
 
-  const loadWalkerData = useCallback(async () => {
-    if (!supabase || !userId || profile?.role !== 'walker') return;
-    setLoadingData(true); setError('');
-    const { data, error: queryError } = await supabase.from('bookings')
-      .select('id, scheduled_at, duration_minutes, service_address, customer_notes, status, dog:dogs(name, breed)')
-      .eq('walker_id', userId).order('scheduled_at', { ascending: true }).limit(50);
-    if (queryError) setError('Assigned walks load नहीं हुए: ' + queryError.message);
-    else setAssignedWalks((data ?? []) as unknown as AssignedWalk[]);
-    setLoadingData(false);
-  }, [userId, profile?.role]);
+
 
   async function sendOtp() {
     if (!supabase) return;
