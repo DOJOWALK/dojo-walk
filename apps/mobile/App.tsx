@@ -264,6 +264,4 @@ const styles = StyleSheet.create({
   footnote: { color: '#999', fontSize: 10, textAlign: 'center', marginTop: 18 },
   role: { color: '#B75A1C', fontSize: 12, fontWeight: '800', marginTop: 7 },
   footer: { color: '#AAA', fontSize: 9, letterSpacing: 1, marginTop: 28, textAlign: 'center' },
-  noticeTitle: { color: '#8E471B', fontWeight: '800', fontSize: 12 },
-  noticeBody: { color: '#8E471B', fontSize: 11, lineHeight: 17, marginTop: 5 },
 });
