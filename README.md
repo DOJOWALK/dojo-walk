@@ -19,7 +19,8 @@ DOJO WALK is a dog-walking service platform for customers, walkers, and administ
 - [x] Mobile phone OTP sign-in screens for customer and walker accounts.
 - [x] Customer dog profile creation and package overview (read-only).
 - [ ] Customer subscription request, UPI payment submission, and booking screens.
-- [ ] Walker assigned-dog, start/stop walk, GPS, and report screens.
+- [x] Walker assigned-walk list with assigned dog details (read-only).
+- [ ] Walker start/stop walk, GPS, and report controls.
 - [ ] Admin payment verification, walker assignment, pricing, and payout management.
 - [ ] End-to-end testing and Android/iOS release builds.
 
