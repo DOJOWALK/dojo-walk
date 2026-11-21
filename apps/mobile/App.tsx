@@ -495,7 +495,7 @@ export default function App() {
 
   async function submitSundayExtraWalk() {
     if (!supabase || !selectedDogId) { setError('पहले dog चुनें।'); return; }
-    const match = /^(\\d{4})-(\\d{2})-(\\d{2})\\s+(\\d{2}):(\\d{2})$/.exec(sundaySchedule.trim());
+    const match = /^(\d{4})-(\d{2})-(\d{2})\s+(\d{2}):(\d{2})$/.exec(sundaySchedule.trim());
     if (!match) { setError('Sunday date और time YYYY-MM-DD HH:MM format में डालें।'); return; }
     const [, y, m, d, h, min] = match;
     const date = new Date(Number(y), Number(m)-1, Number(d), Number(h), Number(min));
@@ -718,6 +718,8 @@ export default function App() {
                 <Text style={styles.label}>Walk duration</Text>
                 <View style={styles.choiceRow}>{walkPrices.map((row) => <Pressable key={row.id} onPress={() => setSundayDuration(row.duration_minutes)} style={[styles.dogChoice, sundayDuration === row.duration_minutes && styles.dogChoiceSelected]}><Text style={[styles.dogChoiceText, sundayDuration === row.duration_minutes && styles.dogChoiceTextSelected]}>{row.duration_minutes} min · {money(row.price_inr)}</Text></Pressable>)}</View>
                 <Text style={styles.body}>Payable amount: {money(walkPrices.find((row) => row.duration_minutes === sundayDuration)?.price_inr ?? 0)}</Text>
+                <Image source={{ uri: 'data:image/png;base64,' + PHONEPE_QR_BASE64 }} style={styles.paymentQr} resizeMode="contain" />
+                <Text style={styles.upiId}>{DOJO_UPI_ID}</Text>
                 <Text style={styles.label}>UPI transaction reference / UTR *</Text>
                 <TextInput value={sundayUtr} onChangeText={setSundayUtr} placeholder="Successful payment ka UTR" style={styles.input} autoCapitalize="characters" maxLength={100} />
                 <Pressable style={styles.outlineButton} onPress={() => {
