@@ -83,6 +83,9 @@ export default function App() {
   const [dogAge, setDogAge] = useState('');
   const [dogNotes, setDogNotes] = useState('');
   const [walkReport, setWalkReport] = useState('');
+  const [bookingSchedule, setBookingSchedule] = useState('');
+  const [bookingAddress, setBookingAddress] = useState('');
+  const [bookingNotes, setBookingNotes] = useState('');
   const [gpsMessage, setGpsMessage] = useState('');
   const locationSubscription = useRef<Location.LocationSubscription | null>(null);
 
@@ -126,7 +129,7 @@ export default function App() {
     if (!supabase || !userId || profile?.role !== 'customer') return;
     const { data: bookings, error: bookingError } = await supabase.from('bookings')
       .select('id, scheduled_at, status, actual_started_at, actual_ended_at, actual_duration_minutes, walk_report, dog:dogs(name)')
-      .eq('customer_id', userId).in('status', ['in_progress', 'completed'])
+      .eq('customer_id', userId).in('status', ['requested', 'assigned', 'accepted', 'in_progress', 'completed'])
       .order('scheduled_at', { ascending: false }).limit(20);
     if (bookingError) { setError('Walk history load नहीं हुई: ' + bookingError.message); return; }
     const rows = (bookings ?? []) as unknown as CustomerWalk[];
@@ -284,6 +287,49 @@ export default function App() {
     setBusy(false);
   }
 
+  async function requestSubscriptionWalk() {
+    if (!supabase || !selectedDogId) {
+      setError('पहले dog चुनें।');
+      return;
+    }
+    const match = /^(\\d{4})-(\\d{2})-(\\d{2})\\s+(\\d{2}):(\\d{2})$/.exec(bookingSchedule.trim());
+    if (!match) {
+      setError('Date और time इस format में डालें: YYYY-MM-DD HH:MM (24-hour)');
+      return;
+    }
+    const [, year, month, day, hour, minute] = match;
+    const scheduled = new Date(Number(year), Number(month) - 1, Number(day), Number(hour), Number(minute));
+    if (
+      scheduled.getFullYear() !== Number(year) ||
+      scheduled.getMonth() !== Number(month) - 1 ||
+      scheduled.getDate() !== Number(day) ||
+      scheduled.getHours() !== Number(hour) ||
+      scheduled.getMinutes() !== Number(minute) ||
+      scheduled.getTime() <= Date.now()
+    ) {
+      setError('कृपया आने वाली सही date और time डालें।');
+      return;
+    }
+    if (!bookingAddress.trim()) {
+      setError('Walk का पूरा address डालें।');
+      return;
+    }
+    setBusy(true); setError(''); setMessage('');
+    const { error: bookingError } = await supabase.rpc('customer_request_subscription_walk', {
+      p_dog_id: selectedDogId,
+      p_scheduled_at: scheduled.toISOString(),
+      p_service_address: bookingAddress.trim(),
+      p_customer_notes: bookingNotes.trim() || null,
+    });
+    if (bookingError) setError('Walk request नहीं बनी: ' + bookingError.message);
+    else {
+      setBookingSchedule(''); setBookingNotes('');
+      setMessage('Walk request Admin को भेज दी गई है। Approved walker assign होने के बाद status यहाँ दिखेगा।');
+      await loadCustomerWalks();
+    }
+    setBusy(false);
+  }
+
   async function submitPayLaterRequest() {
     if (!supabase || !selectedDogId || !selectedPackageId) {
       setError('पहले dog और package चुनें।');
@@ -359,6 +405,11 @@ export default function App() {
 
   const roleText = profile?.role === 'walker' ? 'Walker account' : profile?.role === 'admin' ? 'Admin account' : 'Customer account';
   const selectedPackage = packages.find((item) => item.id === selectedPackageId);
+  const selectedDogSubscription = subscriptions.find((item) =>
+    item.dog_id === selectedDogId && item.status === 'active' &&
+    item.starts_on <= new Date().toLocaleDateString('en-CA') &&
+    item.ends_on >= new Date().toLocaleDateString('en-CA')
+  );
   const upiPayUrl = selectedPackage
     ? 'upi://pay?pa=' + encodeURIComponent(DOJO_UPI_ID) + '&pn=' + encodeURIComponent('Bapan Rajbanshi') + '&am=' + selectedPackage.monthly_price_inr + '&cu=INR&tn=' + encodeURIComponent('DOJO WALK monthly package')
     : '';
@@ -417,6 +468,21 @@ export default function App() {
                   <View style={{ flex: 1 }}><Text style={styles.dogName}>{dog.name}</Text><Text style={styles.dogMeta}>{[dog.breed, dog.age_years !== null ? dog.age_years + ' years' : null].filter(Boolean).join(' · ') || 'Breed and age not added'}</Text><Text style={styles.dogStatus}>{active ? 'Active package · ' + money(active.monthly_price_inr) + '/month' : pending ? 'Payment submitted · awaiting Admin verification' : 'No active package yet'}</Text></View>
                 </View>;
               })}
+              <View style={styles.paymentPanel}>
+                <Text style={styles.sectionTitle}>Request a subscription walk</Text>
+                <Text style={styles.footnote}>Active monthly package वाले dog के लिए Monday–Saturday walk request करें। Daily walk limit database automatically check करेगा।</Text>
+                <Text style={styles.label}>Dog</Text>
+                <View style={styles.choiceRow}>{dogs.map((dog) => <Pressable key={dog.id} onPress={() => setSelectedDogId(dog.id)} style={[styles.dogChoice, selectedDogId === dog.id && styles.dogChoiceSelected]}><Text style={[styles.dogChoiceText, selectedDogId === dog.id && styles.dogChoiceTextSelected]}>{dog.name}</Text></Pressable>)}</View>
+                {selectedDogSubscription ? <>
+                  <Text style={styles.label}>Date & time · YYYY-MM-DD HH:MM</Text>
+                  <TextInput value={bookingSchedule} onChangeText={setBookingSchedule} placeholder="2026-11-24 08:00" style={styles.input} autoCapitalize="none" />
+                  <Text style={styles.label}>Full walk address *</Text>
+                  <TextInput value={bookingAddress} onChangeText={setBookingAddress} placeholder="Flat, tower, society, Gaur City..." style={styles.input} maxLength={300} />
+                  <Text style={styles.label}>Walker instructions (optional)</Text>
+                  <TextInput value={bookingNotes} onChangeText={setBookingNotes} placeholder="Gate entry, leash, behaviour notes..." multiline style={[styles.input, styles.multiline]} maxLength={1000} />
+                  <Pressable style={[styles.primaryButton, busy && styles.disabled]} onPress={() => void requestSubscriptionWalk()} disabled={busy}>{busy ? <ActivityIndicator color="#fff" /> : <Text style={styles.primaryText}>Request walk</Text>}</Pressable>
+                </> : <Text style={styles.body}>इस dog के लिए active monthly package नहीं है। पहले package activate करवाएँ।</Text>}
+              </View>
               <View style={styles.sectionHeader}><View><Text style={styles.sectionTitle}>Walk Tracking & History</Text><Text style={styles.sectionHint}>Active walk की latest location और completed route points</Text></View><Pressable style={styles.smallPrimary} onPress={() => void loadCustomerWalks()}><Text style={styles.smallPrimaryText}>Refresh</Text></Pressable></View>
               {customerWalks.length === 0 ? <View style={styles.empty}><Text style={styles.emptyTitle}>अभी कोई active या completed walk नहीं है</Text><Text style={styles.body}>Walk शुरू होने के बाद location और route यहाँ दिखाई देंगे।</Text></View> : customerWalks.map((walk) => {
                 const points = customerRoutePoints.filter((point) => point.booking_id === walk.id);
@@ -425,7 +491,7 @@ export default function App() {
                 const mapUrl = latest ? 'https://www.openstreetmap.org/?mlat=' + latest.latitude + '&mlon=' + latest.longitude + '#map=17/' + latest.latitude + '/' + latest.longitude : '';
                 return <View style={styles.dogCard} key={walk.id}>
                   <View style={{ flex: 1 }}>
-                    <Text style={styles.dogName}>{walk.dog?.name || 'Dog walk'} · {walk.status === 'in_progress' ? 'Live walk' : 'Completed'}</Text>
+                    <Text style={styles.dogName}>{walk.dog?.name || 'Dog walk'} · {walk.status === 'in_progress' ? 'Live walk' : walk.status === 'completed' ? 'Completed' : walk.status.charAt(0).toUpperCase() + walk.status.slice(1)}</Text>
                     <Text style={styles.dogMeta}>{new Date(walk.scheduled_at).toLocaleString('en-IN', { dateStyle: 'medium', timeStyle: 'short' })}</Text>
                     <Text style={styles.dogMeta}>{points.length} GPS points recorded</Text>
                     {walk.actual_duration_minutes ? <Text style={styles.dogMeta}>Duration: {walk.actual_duration_minutes} minutes</Text> : null}
