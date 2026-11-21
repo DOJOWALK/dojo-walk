@@ -9,6 +9,8 @@ type Booking = {
   duration_minutes: number;
   service_type: string;
 };
+type RoutePoint = { id: number; booking_id: string; latitude: number; longitude: number; recorded_at: string };
+type RouteWalk = { id: string; status: string; scheduled_at: string; actual_started_at: string | null; actual_ended_at: string | null; dog: { name: string } | null; points: RoutePoint[] };
 type PendingPayment = {
   id: string;
   amount_inr: number;
@@ -43,6 +45,7 @@ export default function App() {
   const [metrics, setMetrics] = useState({ dogs: 0, activeSubscriptions: 0, todayWalks: 0, pendingPayments: 0 });
   const [walks, setWalks] = useState<Booking[]>([]);
   const [payments, setPayments] = useState<PendingPayment[]>([]);
+  const [routeWalks, setRouteWalks] = useState<RouteWalk[]>([]);
   const [lastUpdated, setLastUpdated] = useState('');
 
   async function verifyAdmin(userId: string, userEmail?: string) {
@@ -68,7 +71,7 @@ export default function App() {
     const now = new Date();
     const dayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
     const dayEnd = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1);
-    const [dogs, subscriptions, today, pending, recentWalks, recentPayments] = await Promise.all([
+    const [dogs, subscriptions, today, pending, recentWalks, recentPayments, routeBookings] = await Promise.all([
       supabase.from('dogs').select('id', { count: 'exact', head: true }),
       supabase.from('dog_subscriptions').select('id', { count: 'exact', head: true }).eq('status', 'active'),
       supabase.from('bookings').select('id', { count: 'exact', head: true })
@@ -80,8 +83,12 @@ export default function App() {
       supabase.from('subscription_payments')
         .select('id, amount_inr, upi_transaction_ref, submitted_at, status')
         .eq('status', 'pending').order('submitted_at', { ascending: true }).limit(6),
+      supabase.from('bookings')
+        .select('id, status, scheduled_at, actual_started_at, actual_ended_at, dog:dogs(name)')
+        .in('status', ['in_progress', 'completed'])
+        .order('actual_started_at', { ascending: false }).limit(20),
     ]);
-    const firstError = dogs.error || subscriptions.error || today.error || pending.error || recentWalks.error || recentPayments.error;
+    const firstError = dogs.error || subscriptions.error || today.error || pending.error || recentWalks.error || recentPayments.error || routeBookings.error;
     if (firstError) {
       setDashboardError('Database data load नहीं हो पाया: ' + firstError.message);
     } else {
@@ -93,6 +100,15 @@ export default function App() {
       });
       setWalks((recentWalks.data ?? []) as Booking[]);
       setPayments((recentPayments.data ?? []) as PendingPayment[]);
+      const routeRows = (routeBookings.data ?? []) as unknown as Omit<RouteWalk, 'points'>[];
+      const routeIds = routeRows.map((item) => item.id);
+      if (routeIds.length) {
+        const { data: routePoints, error: routeError } = await supabase.from('walker_locations')
+          .select('id, booking_id, latitude, longitude, recorded_at')
+          .in('booking_id', routeIds).order('recorded_at', { ascending: true });
+        if (routeError) setDashboardError('Route data load नहीं हुआ: ' + routeError.message);
+        else setRouteWalks(routeRows.map((walk) => ({ ...walk, points: ((routePoints ?? []) as RoutePoint[]).filter((point) => point.booking_id === walk.id) })));
+      } else setRouteWalks([]);
       setLastUpdated(new Date().toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' }));
     }
     setDashboardLoading(false);
@@ -124,7 +140,13 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    if (isAdmin) void loadDashboard();
+    if (!isAdmin || !supabase) return;
+    void loadDashboard();
+    const channel = supabase.channel('admin-live-walk-routes')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'walker_locations' }, () => { void loadDashboard(); })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'bookings' }, () => { void loadDashboard(); })
+      .subscribe();
+    return () => { void supabase?.removeChannel(channel); };
   }, [isAdmin, loadDashboard]);
 
   async function signIn(event: React.FormEvent<HTMLFormElement>) {
@@ -188,6 +210,18 @@ export default function App() {
           <article className="metric"><p>Active subscriptions</p><strong>{metrics.activeSubscriptions}</strong><small>अभी चालू packages</small></article>
           <article className="metric"><p>Today's walks</p><strong>{metrics.todayWalks}</strong><small>आज scheduled walks</small></article>
           <article className="metric"><p>Pending UPI payments</p><strong>{metrics.pendingPayments}</strong><small>Admin verification बाकी</small></article>
+        </section>
+        <section className="panel route-panel" id="live-routes">
+          <div className="panel-heading"><div><h3>Live walker locations & route history</h3><p>Only active walks and recent completed walks are shown</p></div><span className="subtle-count">{routeWalks.filter((walk) => walk.status === 'in_progress').length} active</span></div>
+          {routeWalks.length === 0 ? <p className="empty">अभी कोई active या completed walk route उपलब्ध नहीं है।</p> : <div className="route-list">{routeWalks.map((walk) => {
+            const first = walk.points[0];
+            const latest = walk.points[walk.points.length - 1];
+            const mapUrl = latest ? 'https://www.openstreetmap.org/?mlat=' + latest.latitude + '&mlon=' + latest.longitude + '#map=17/' + latest.latitude + '/' + latest.longitude : '';
+            return <article className="route-row" key={walk.id}>
+              <div className="route-info"><strong>{walk.dog?.name || 'Dog walk'} · {walk.status === 'in_progress' ? 'LIVE' : 'Completed'}</strong><small>{walk.actual_started_at ? dateTime(walk.actual_started_at) : dateTime(walk.scheduled_at)}</small><small>{walk.points.length} GPS points · {latest ? 'Last update ' + dateTime(latest.recorded_at) : 'No GPS points yet'}</small>{first && latest ? <small>Start {first.latitude.toFixed(5)}, {first.longitude.toFixed(5)} → Latest {latest.latitude.toFixed(5)}, {latest.longitude.toFixed(5)}</small> : null}</div>
+              {latest ? <a className="map-link" href={mapUrl} target="_blank" rel="noreferrer">Open map ↗</a> : null}
+            </article>;
+          })}</div>}
         </section>
         <section className="data-grid">
           <article className="panel" id="walks">
