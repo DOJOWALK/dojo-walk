@@ -55,7 +55,8 @@ begin
   if not exists (select 1 from public.profiles p where p.id = v_customer_id and p.role = 'customer') then
     raise exception 'Customer account required';
   end if;
-  if not exists (select 1 from public.dogs d where d.id = p_dog_id and d.customer_id = v_customer_id) then
+  perform 1 from public.dogs d where d.id = p_dog_id and d.customer_id = v_customer_id for update;
+  if not found then
     raise exception 'Dog not found for this customer';
   end if;
   if p_scheduled_at is null or p_scheduled_at <= clock_timestamp()
