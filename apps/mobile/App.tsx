@@ -138,7 +138,16 @@ export default function App() {
     if (failed) setError('जानकारी load नहीं हुई: ' + failed.message);
     else {
       setDogs((dogResult.data ?? []) as Dog[]);
-      if (!selectedDogId && dogResult.data?.length) setSelectedDogId(dogResult.data[0].id);
+      if (!selectedDogId && dogResult.data?.length) {
+        const firstDog = dogResult.data[0] as Dog;
+        const firstSchedule = (scheduleResult.data ?? []).find((item) => item.dog_id === firstDog.id) as WalkSchedule | undefined;
+        setSelectedDogId(firstDog.id);
+        setBookingAddress(firstSchedule?.service_address || firstDog.service_address || '');
+        setBookingLatitude(firstSchedule?.service_latitude ?? firstDog.service_latitude);
+        setBookingLongitude(firstSchedule?.service_longitude ?? firstDog.service_longitude);
+        setScheduleMorningTime(firstSchedule?.morning_time?.slice(0,5) || '08:00');
+        setScheduleEveningTime(firstSchedule?.evening_time?.slice(0,5) || '18:00');
+      }
       setPackages((packageResult.data ?? []) as Package[]);
       setSubscriptions((subscriptionResult.data ?? []) as Subscription[]);
       setWalkSchedules((scheduleResult.data ?? []) as WalkSchedule[]);
@@ -575,7 +584,7 @@ export default function App() {
                 <Text style={styles.sectionTitle}>Weekly recurring walk schedule</Text>
                 <Text style={styles.footnote}>एक बार timing set करें। DOJO WALK Monday–Saturday future bookings बनाएगा। Sunday regular package में off है।</Text>
                 <Text style={styles.label}>Dog</Text>
-                <View style={styles.choiceRow}>{dogs.map((dog) => <Pressable key={dog.id} onPress={() => { setSelectedDogId(dog.id); setBookingAddress(dog.service_address || ''); setBookingLatitude(dog.service_latitude); setBookingLongitude(dog.service_longitude); }} style={[styles.dogChoice, selectedDogId === dog.id && styles.dogChoiceSelected]}><Text style={[styles.dogChoiceText, selectedDogId === dog.id && styles.dogChoiceTextSelected]}>{dog.name}</Text></Pressable>)}</View>
+                <View style={styles.choiceRow}>{dogs.map((dog) => <Pressable key={dog.id} onPress={() => { const savedSchedule = walkSchedules.find((item) => item.dog_id === dog.id); setSelectedDogId(dog.id); setBookingAddress(savedSchedule?.service_address || dog.service_address || ''); setBookingLatitude(savedSchedule?.service_latitude ?? dog.service_latitude); setBookingLongitude(savedSchedule?.service_longitude ?? dog.service_longitude); setScheduleMorningTime(savedSchedule?.morning_time?.slice(0,5) || '08:00'); setScheduleEveningTime(savedSchedule?.evening_time?.slice(0,5) || '18:00'); }} style={[styles.dogChoice, selectedDogId === dog.id && styles.dogChoiceSelected]}><Text style={[styles.dogChoiceText, selectedDogId === dog.id && styles.dogChoiceTextSelected]}>{dog.name}</Text></Pressable>)}</View>
                 {selectedDogSubscription ? <>
                   <Text style={styles.footnote}>{selectedDogSubscription.walks_per_day === 1 ? '1 walk/day package: Morning या Evening में से एक चुनें।' : '2 walks/day package: Morning और Evening दोनों की timing भरें।'}</Text>
                   {selectedDogSubscription.walks_per_day === 1 ? <>
