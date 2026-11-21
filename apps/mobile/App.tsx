@@ -9,7 +9,7 @@ import {
 import { isSupabaseConfigured, supabase } from './lib/supabase';
 
 type Profile = { role: 'customer' | 'walker' | 'admin'; full_name: string | null; phone: string | null };
-type Dog = { id: string; name: string; breed: string | null; age_years: number | null; notes: string | null };
+type Dog = { id: string; name: string; breed: string | null; age_years: number | null; notes: string | null; service_address: string | null; service_latitude: number | null; service_longitude: number | null };
 type Package = { id: string; walks_per_day: number; duration_minutes: number; monthly_price_inr: number };
 type Subscription = { id: string; dog_id: string; walks_per_day: number; duration_minutes: number; monthly_price_inr: number; starts_on: string; ends_on: string; status: string };
 type CustomerWalk = { id: string; scheduled_at: string; status: string; actual_started_at: string | null; actual_ended_at: string | null; actual_duration_minutes: number | null; walk_report: string | null; dog: { name: string } | null };
@@ -82,10 +82,16 @@ export default function App() {
   const [dogBreed, setDogBreed] = useState('');
   const [dogAge, setDogAge] = useState('');
   const [dogNotes, setDogNotes] = useState('');
+  const [dogServiceAddress, setDogServiceAddress] = useState('');
+  const [dogLatitude, setDogLatitude] = useState<number | null>(null);
+  const [dogLongitude, setDogLongitude] = useState<number | null>(null);
   const [walkReport, setWalkReport] = useState('');
   const [bookingSchedule, setBookingSchedule] = useState('');
   const [bookingAddress, setBookingAddress] = useState('');
   const [bookingNotes, setBookingNotes] = useState('');
+  const [bookingSlot, setBookingSlot] = useState<'morning' | 'evening'>('morning');
+  const [bookingLatitude, setBookingLatitude] = useState<number | null>(null);
+  const [bookingLongitude, setBookingLongitude] = useState<number | null>(null);
   const [gpsMessage, setGpsMessage] = useState('');
   const locationSubscription = useRef<Location.LocationSubscription | null>(null);
 
@@ -108,7 +114,7 @@ export default function App() {
     if (!supabase || !userId || profile?.role !== 'customer') return;
     setLoadingData(true); setError('');
     const [dogResult, packageResult, subscriptionResult, payLaterResult] = await Promise.all([
-      supabase.from('dogs').select('id, name, breed, age_years, notes').eq('customer_id', userId).order('created_at', { ascending: false }),
+      supabase.from('dogs').select('id, name, breed, age_years, notes, service_address, service_latitude, service_longitude').eq('customer_id', userId).order('created_at', { ascending: false }),
       supabase.from('service_packages').select('id, walks_per_day, duration_minutes, monthly_price_inr').eq('active', true).order('walks_per_day'),
       supabase.from('dog_subscriptions').select('id, dog_id, walks_per_day, duration_minutes, monthly_price_inr, starts_on, ends_on, status').eq('customer_id', userId).order('created_at', { ascending: false }),
       supabase.from('pay_later_requests').select('id, dog_id, status, created_at').eq('customer_id', userId).order('created_at', { ascending: false }),
@@ -287,6 +293,17 @@ export default function App() {
     setBusy(false);
   }
 
+  async function captureServiceLocation(forDogProfile = false) {
+    try {
+      const permission = await Location.requestForegroundPermissionsAsync();
+      if (!permission.granted) { setError('Location permission दें या address manually भरें।'); return; }
+      const current = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High });
+      if (forDogProfile) { setDogLatitude(current.coords.latitude); setDogLongitude(current.coords.longitude); }
+      else { setBookingLatitude(current.coords.latitude); setBookingLongitude(current.coords.longitude); }
+      setMessage('Map location attach हो गई है। Address भी सही से भरें।');
+    } catch (e) { setError('Location नहीं मिली: ' + (e instanceof Error ? e.message : 'Unknown error')); }
+  }
+
   async function requestSubscriptionWalk() {
     if (!supabase || !selectedDogId) {
       setError('पहले dog चुनें।');
@@ -315,15 +332,17 @@ export default function App() {
       return;
     }
     setBusy(true); setError(''); setMessage('');
-    const { error: bookingError } = await supabase.rpc('customer_request_subscription_walk', {
+    const { error: bookingError } = await supabase.rpc('customer_request_subscription_walk_with_location', {
       p_dog_id: selectedDogId,
       p_scheduled_at: scheduled.toISOString(),
       p_service_address: bookingAddress.trim(),
       p_customer_notes: bookingNotes.trim() || null,
+      p_latitude: bookingLatitude,
+      p_longitude: bookingLongitude,
     });
     if (bookingError) setError('Walk request नहीं बनी: ' + bookingError.message);
     else {
-      setBookingSchedule(''); setBookingNotes('');
+      setBookingSchedule(''); setBookingNotes(''); setBookingLatitude(null); setBookingLongitude(null);
       setMessage('Walk request Admin को भेज दी गई है। Approved walker assign होने के बाद status यहाँ दिखेगा।');
       await loadCustomerWalks();
     }
@@ -384,10 +403,12 @@ export default function App() {
     const { error: insertError } = await supabase.from('dogs').insert({
       customer_id: userId, name: dogName.trim(), breed: dogBreed.trim() || null,
       age_years: age, notes: dogNotes.trim() || null,
+      service_address: dogServiceAddress.trim() || null,
+      service_latitude: dogLatitude, service_longitude: dogLongitude,
     });
     if (insertError) setError('Dog profile save नहीं हुआ: ' + insertError.message);
     else {
-      setDogName(''); setDogBreed(''); setDogAge(''); setDogNotes('');
+      setDogName(''); setDogBreed(''); setDogAge(''); setDogNotes(''); setDogServiceAddress(''); setDogLatitude(null); setDogLongitude(null);
       setShowDogForm(false); setMessage('Dog profile सफलतापूर्वक जोड़ दिया गया।');
       await loadCustomerData();
     }
@@ -457,6 +478,9 @@ export default function App() {
                 <Text style={styles.label}>Dog name *</Text><TextInput value={dogName} onChangeText={setDogName} placeholder="e.g. Bruno" style={styles.input} maxLength={60} />
                 <Text style={styles.label}>Breed</Text><TextInput value={dogBreed} onChangeText={setDogBreed} placeholder="e.g. Labrador" style={styles.input} maxLength={80} />
                 <Text style={styles.label}>Age in years</Text><TextInput value={dogAge} onChangeText={setDogAge} placeholder="e.g. 2" keyboardType="decimal-pad" style={styles.input} />
+                <Text style={styles.label}>Service address / flat / tower *</Text><TextInput value={dogServiceAddress} onChangeText={setDogServiceAddress} placeholder="Flat, tower, society, Gaur City..." style={styles.input} maxLength={300} />
+                <Pressable style={styles.outlineButton} onPress={() => void captureServiceLocation(true)}><Text style={styles.outlineText}>📍 Use my current location</Text></Pressable>
+                <Text style={styles.footnote}>{dogLatitude !== null ? `Location saved: ${dogLatitude.toFixed(5)}, ${dogLongitude?.toFixed(5)}` : 'Map location optional, address required for service'}</Text>
                 <Text style={styles.label}>Care notes (optional)</Text><TextInput value={dogNotes} onChangeText={setDogNotes} placeholder="Health, behaviour, instructions..." multiline style={[styles.input, styles.multiline]} maxLength={500} />
                 <Pressable style={[styles.primaryButton, busy && styles.disabled]} onPress={() => void addDog()} disabled={busy}>{busy ? <ActivityIndicator color="#fff" /> : <Text style={styles.primaryText}>Save Dog Profile</Text>}</Pressable>
               </View>}
@@ -474,10 +498,14 @@ export default function App() {
                 <Text style={styles.label}>Dog</Text>
                 <View style={styles.choiceRow}>{dogs.map((dog) => <Pressable key={dog.id} onPress={() => setSelectedDogId(dog.id)} style={[styles.dogChoice, selectedDogId === dog.id && styles.dogChoiceSelected]}><Text style={[styles.dogChoiceText, selectedDogId === dog.id && styles.dogChoiceTextSelected]}>{dog.name}</Text></Pressable>)}</View>
                 {selectedDogSubscription ? <>
-                  <Text style={styles.label}>Date & time · YYYY-MM-DD HH:MM</Text>
+                  <Text style={styles.label}>Walk slot</Text>
+                  <View style={styles.choiceRow}><Pressable onPress={() => setBookingSlot('morning')} style={[styles.dogChoice, bookingSlot === 'morning' && styles.dogChoiceSelected]}><Text style={[styles.dogChoiceText, bookingSlot === 'morning' && styles.dogChoiceTextSelected]}>Morning</Text></Pressable><Pressable onPress={() => setBookingSlot('evening')} style={[styles.dogChoice, bookingSlot === 'evening' && styles.dogChoiceSelected]}><Text style={[styles.dogChoiceText, bookingSlot === 'evening' && styles.dogChoiceTextSelected]}>Evening</Text></Pressable></View>
+                  <Text style={styles.label}>Date & exact time · YYYY-MM-DD HH:MM (24-hour)</Text>
                   <TextInput value={bookingSchedule} onChangeText={setBookingSchedule} placeholder="2026-11-24 08:00" style={styles.input} autoCapitalize="none" />
                   <Text style={styles.label}>Full walk address *</Text>
                   <TextInput value={bookingAddress} onChangeText={setBookingAddress} placeholder="Flat, tower, society, Gaur City..." style={styles.input} maxLength={300} />
+                  <Pressable style={styles.outlineButton} onPress={() => void captureServiceLocation(false)}><Text style={styles.outlineText}>📍 Share pickup location</Text></Pressable>
+                  <Text style={styles.footnote}>{bookingLatitude !== null ? `Pickup pin: ${bookingLatitude.toFixed(5)}, ${bookingLongitude?.toFixed(5)}` : 'Map pin optional; please enter complete address'}</Text>
                   <Text style={styles.label}>Walker instructions (optional)</Text>
                   <TextInput value={bookingNotes} onChangeText={setBookingNotes} placeholder="Gate entry, leash, behaviour notes..." multiline style={[styles.input, styles.multiline]} maxLength={1000} />
                   <Pressable style={[styles.primaryButton, busy && styles.disabled]} onPress={() => void requestSubscriptionWalk()} disabled={busy}>{busy ? <ActivityIndicator color="#fff" /> : <Text style={styles.primaryText}>Request walk</Text>}</Pressable>
