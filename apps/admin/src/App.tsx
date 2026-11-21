@@ -20,6 +20,12 @@ type CustomerCredit = {
   profile: { full_name: string | null; phone: string | null } | null;
 };
 type CreditEntry = { id: string; entry_type: string; amount_inr: number; description: string; recorded_at: string };
+type PayLaterRequest = {
+  id: string; created_at: string; customer_id: string; dog_id: string; package_id: string;
+  customer: { full_name: string | null; phone: string | null } | null;
+  dog: { name: string } | null;
+  package: { walks_per_day: number; duration_minutes: number; monthly_price_inr: number } | null;
+};
 type PendingPayment = {
   id: string;
   amount_inr: number;
@@ -56,6 +62,7 @@ export default function App() {
   const [metrics, setMetrics] = useState({ dogs: 0, activeSubscriptions: 0, todayWalks: 0, pendingPayments: 0 });
   const [walks, setWalks] = useState<Booking[]>([]);
   const [payments, setPayments] = useState<PendingPayment[]>([]);
+  const [payLaterRequests, setPayLaterRequests] = useState<PayLaterRequest[]>([]);
   const [routeWalks, setRouteWalks] = useState<RouteWalk[]>([]);
   const [lastUpdated, setLastUpdated] = useState('');
   const [creditCustomers, setCreditCustomers] = useState<CustomerCredit[]>([]);
@@ -93,7 +100,7 @@ export default function App() {
     const now = new Date();
     const dayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
     const dayEnd = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1);
-    const [dogs, subscriptions, today, pending, recentWalks, recentPayments, routeBookings] = await Promise.all([
+    const [dogs, subscriptions, today, pending, recentWalks, recentPayments, routeBookings, payLater] = await Promise.all([
       supabase.from('dogs').select('id', { count: 'exact', head: true }),
       supabase.from('dog_subscriptions').select('id', { count: 'exact', head: true }).eq('status', 'active'),
       supabase.from('bookings').select('id', { count: 'exact', head: true })
@@ -109,8 +116,11 @@ export default function App() {
         .select('id, status, scheduled_at, actual_started_at, actual_ended_at, dog:dogs(name)')
         .in('status', ['in_progress', 'completed'])
         .order('actual_started_at', { ascending: false }).limit(20),
+      supabase.from('pay_later_requests')
+        .select('id, created_at, customer_id, dog_id, package_id, customer:profiles!pay_later_requests_customer_id_fkey(full_name,phone), dog:dogs(name), package:service_packages(walks_per_day,duration_minutes,monthly_price_inr)')
+        .eq('status', 'pending').order('created_at', { ascending: true }).limit(50),
     ]);
-    const firstError = dogs.error || subscriptions.error || today.error || pending.error || recentWalks.error || recentPayments.error || routeBookings.error;
+    const firstError = dogs.error || subscriptions.error || today.error || pending.error || recentWalks.error || recentPayments.error || routeBookings.error || payLater.error;
     if (firstError) {
       setDashboardError('Database data load नहीं हो पाया: ' + firstError.message);
     } else {
@@ -122,6 +132,7 @@ export default function App() {
       });
       setWalks((recentWalks.data ?? []) as Booking[]);
       setPayments((recentPayments.data ?? []) as PendingPayment[]);
+      setPayLaterRequests((payLater.data ?? []) as unknown as PayLaterRequest[]);
       const routeRows = (routeBookings.data ?? []) as unknown as Omit<RouteWalk, 'points'>[];
       const routeIds = routeRows.map((item) => item.id);
       if (routeIds.length) {
@@ -277,6 +288,27 @@ export default function App() {
     await loadDashboard();
   }
 
+  async function reviewPayLater(requestId: string, decision: 'approved' | 'rejected') {
+    if (!supabase) return;
+    const note = window.prompt(decision === 'approved'
+      ? 'Optional approval note:'
+      : 'Rejection reason (required):');
+    if (note === null) return;
+    if (decision === 'rejected' && note.trim().length < 3) {
+      setDashboardError('Reject करने के लिए कम से कम 3 अक्षर का कारण लिखें।');
+      return;
+    }
+    setDashboardLoading(true); setDashboardError('');
+    const { error: reviewError } = await supabase.rpc('admin_review_pay_later_request', {
+      p_request_id: requestId, p_decision: decision, p_admin_note: note.trim() || null,
+    });
+    if (reviewError) setDashboardError('Pay Later request review नहीं हुई: ' + reviewError.message);
+    else setDashboardError(decision === 'approved'
+      ? 'Pay Later approved. Package active और monthly due ledger में दर्ज हो गया।'
+      : 'Pay Later request rejected.');
+    await loadDashboard();
+  }
+
   async function signIn(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!supabase) return;
@@ -323,7 +355,7 @@ export default function App() {
       <aside className="sidebar">
         <div className="brand"><span className="brand-mark">DW</span><span>DOJO WALK</span></div>
         <p className="side-label">WORKSPACE</p>
-        <nav><a className="active" href="#overview">Overview</a><a href="#walks">Walks</a><a href="#payments">Payments</a><a href="#dogs">Dogs & customers</a><a href="#walkers">Walkers</a><a href="#payouts">Walker payouts</a><a href="#trusted-customers">Trusted customers</a></nav>
+        <nav><a className="active" href="#overview">Overview</a><a href="#walks">Walks</a><a href="#payments">Payments</a><a href="#pay-later-requests">Pay Later approvals</a><a href="#dogs">Dogs & customers</a><a href="#walkers">Walkers</a><a href="#payouts">Walker payouts</a><a href="#trusted-customers">Trusted customers</a></nav>
         <div className="sidebar-foot">WALK. CARE. TRUST.</div>
       </aside>
       <section className="content" id="overview">
@@ -350,6 +382,16 @@ export default function App() {
               {latest ? <a className="map-link" href={mapUrl} target="_blank" rel="noreferrer">Open map ↗</a> : null}
             </article>;
           })}</div>}
+        </section>
+        <section className="panel route-panel" id="pay-later-requests">
+          <div className="panel-heading"><div><h3>Pay Later requests · Admin approval</h3><p>Approve करने पर package active होगा और पूरा monthly charge customer ledger में जुड़ेगा।</p></div><span className="subtle-count">{payLaterRequests.length} pending</span></div>
+          {payLaterRequests.length === 0 ? <p className="empty">कोई pending Pay Later request नहीं है।</p> : <div className="payment-list">{payLaterRequests.map((request) => <div className="payment-row payment-review-row" key={request.id}>
+            <div><strong>{request.dog?.name || 'Dog'} · {money(request.package?.monthly_price_inr ?? 0)}</strong>
+              <small>{request.customer?.full_name || 'Customer'} {request.customer?.phone ? '· ' + request.customer.phone : ''}</small>
+              <small>{request.package?.walks_per_day ?? '—'} walk(s)/day · {request.package?.duration_minutes ?? '—'} min · Requested {dateTime(request.created_at)}</small>
+              <div className="payment-actions"><button className="refresh approve" onClick={() => void reviewPayLater(request.id, 'approved')}>Approve & activate</button><button className="refresh reject" onClick={() => void reviewPayLater(request.id, 'rejected')}>Reject</button></div>
+            </div><span className="pill pending">Approval pending</span>
+          </div>)}</div>}
         </section>
         <section className="data-grid">
           <article className="panel" id="walks">
