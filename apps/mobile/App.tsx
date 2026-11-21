@@ -3,28 +3,41 @@ import { StatusBar } from 'expo-status-bar';
 import * as Location from 'expo-location';
 import * as TaskManager from 'expo-task-manager';
 import {
-  ActivityIndicator, KeyboardAvoidingView, Linking, Platform, Pressable,
+  ActivityIndicator, Image, KeyboardAvoidingView, Linking, Platform, Pressable,
   ScrollView, StyleSheet, Text, TextInput, View,
 } from 'react-native';
 import { isSupabaseConfigured, supabase } from './lib/supabase';
 
 type Profile = { role: 'customer' | 'walker' | 'admin'; full_name: string | null; phone: string | null };
-type Dog = { id: string; name: string; breed: string | null; age_years: number | null; notes: string | null };
+type Dog = { id: string; name: string; breed: string | null; age_years: number | null; notes: string | null; service_address: string | null; service_latitude: number | null; service_longitude: number | null };
 type Package = { id: string; walks_per_day: number; duration_minutes: number; monthly_price_inr: number };
 type Subscription = { id: string; dog_id: string; walks_per_day: number; duration_minutes: number; monthly_price_inr: number; starts_on: string; ends_on: string; status: string };
-type CustomerWalk = { id: string; scheduled_at: string; status: string; actual_started_at: string | null; actual_ended_at: string | null; actual_duration_minutes: number | null; walk_report: string | null; dog: { name: string } | null };
+type CustomerWalk = { id: string; scheduled_at: string; service_address: string; service_slot: string | null; status: string; actual_started_at: string | null; actual_ended_at: string | null; actual_duration_minutes: number | null; walk_report: string | null; dog: { name: string } | null };
+type CustomerChangeRequest = { id: string; booking_id: string; status: string; proposed_scheduled_at: string | null; proposed_service_address: string | null; proposed_service_slot: string | null; admin_note: string | null; created_at: string };
+type WalkSchedule = { id: string; subscription_id: string; dog_id: string; morning_time: string | null; evening_time: string | null; service_address: string; service_latitude: number | null; service_longitude: number | null; customer_notes: string | null };
+type ScheduleChangeRequest = { id: string; dog_id: string; status: string; admin_note: string | null; created_at: string };
 type RoutePoint = { id: number; booking_id: string; latitude: number; longitude: number; recorded_at: string };
 type AssignedWalk = { id: string; scheduled_at: string; duration_minutes: number; service_address: string; customer_notes: string | null; status: string; actual_started_at: string | null; actual_ended_at: string | null; actual_duration_minutes: number | null; walk_report: string | null; dog: { name: string; breed: string | null } | null };
 
 const WALK_LOCATION_TASK = 'dojo-walk-active-route';
+const PHONEPE_QR_BASE64 = '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';
+const DOJO_UPI_ID = '9625813987-4@axl';
 
 TaskManager.defineTask(WALK_LOCATION_TASK, async ({ data, error }) => {
   if (error || !supabase) return;
-  const bookingId = globalThis.localStorage?.getItem('dojo_active_booking_id');
-  if (!bookingId) return;
   const { data: sessionData } = await supabase.auth.getSession();
   const walkerId = sessionData.session?.user.id;
   if (!walkerId) return;
+  // Resolve the active walk from the database. React Native has no browser localStorage,
+  // and the database enforces at most one active walk per walker.
+  const { data: activeBooking, error: bookingError } = await supabase
+    .from('bookings')
+    .select('id')
+    .eq('walker_id', walkerId)
+    .eq('status', 'in_progress')
+    .maybeSingle();
+  if (bookingError || !activeBooking) return;
+  const bookingId = activeBooking.id;
   const locations = (data as { locations?: Location.LocationObject[] } | undefined)?.locations ?? [];
   if (!locations.length) return;
   await supabase.from('walker_locations').insert(
@@ -59,8 +72,22 @@ export default function App() {
   const [dogs, setDogs] = useState<Dog[]>([]);
   const [packages, setPackages] = useState<Package[]>([]);
   const [subscriptions, setSubscriptions] = useState<Subscription[]>([]);
+  const [walkSchedules, setWalkSchedules] = useState<WalkSchedule[]>([]);
+  const [scheduleChangeRequests, setScheduleChangeRequests] = useState<ScheduleChangeRequest[]>([]);
+  const [scheduleMorningTime, setScheduleMorningTime] = useState('08:00');
+  const [scheduleEveningTime, setScheduleEveningTime] = useState('18:00');
+  const [selectedDogId, setSelectedDogId] = useState('');
+  const [selectedPackageId, setSelectedPackageId] = useState('');
+  const [upiTransactionRef, setUpiTransactionRef] = useState('');
+  const [payLaterRequests, setPayLaterRequests] = useState<{ id: string; dog_id: string; status: string; created_at: string }[]>([]);
   const [assignedWalks, setAssignedWalks] = useState<AssignedWalk[]>([]);
   const [customerWalks, setCustomerWalks] = useState<CustomerWalk[]>([]);
+  const [customerChangeRequests, setCustomerChangeRequests] = useState<CustomerChangeRequest[]>([]);
+  const [changeBookingId, setChangeBookingId] = useState('');
+  const [changeSchedule, setChangeSchedule] = useState('');
+  const [changeAddress, setChangeAddress] = useState('');
+  const [changeSlot, setChangeSlot] = useState<'morning' | 'evening'>('morning');
+  const [changeNote, setChangeNote] = useState('');
   const [customerRoutePoints, setCustomerRoutePoints] = useState<RoutePoint[]>([]);
   const [loadingData, setLoadingData] = useState(false);
   const [showDogForm, setShowDogForm] = useState(false);
@@ -68,7 +95,16 @@ export default function App() {
   const [dogBreed, setDogBreed] = useState('');
   const [dogAge, setDogAge] = useState('');
   const [dogNotes, setDogNotes] = useState('');
+  const [dogServiceAddress, setDogServiceAddress] = useState('');
+  const [dogLatitude, setDogLatitude] = useState<number | null>(null);
+  const [dogLongitude, setDogLongitude] = useState<number | null>(null);
   const [walkReport, setWalkReport] = useState('');
+  const [bookingSchedule, setBookingSchedule] = useState('');
+  const [bookingAddress, setBookingAddress] = useState('');
+  const [bookingNotes, setBookingNotes] = useState('');
+  const [bookingSlot, setBookingSlot] = useState<'morning' | 'evening'>('morning');
+  const [bookingLatitude, setBookingLatitude] = useState<number | null>(null);
+  const [bookingLongitude, setBookingLongitude] = useState<number | null>(null);
   const [gpsMessage, setGpsMessage] = useState('');
   const locationSubscription = useRef<Location.LocationSubscription | null>(null);
 
@@ -90,30 +126,52 @@ export default function App() {
   const loadCustomerData = useCallback(async () => {
     if (!supabase || !userId || profile?.role !== 'customer') return;
     setLoadingData(true); setError('');
-    const [dogResult, packageResult, subscriptionResult] = await Promise.all([
-      supabase.from('dogs').select('id, name, breed, age_years, notes').eq('customer_id', userId).order('created_at', { ascending: false }),
+    const [dogResult, packageResult, subscriptionResult, payLaterResult, scheduleResult, scheduleChangeResult] = await Promise.all([
+      supabase.from('dogs').select('id, name, breed, age_years, notes, service_address, service_latitude, service_longitude').eq('customer_id', userId).order('created_at', { ascending: false }),
       supabase.from('service_packages').select('id, walks_per_day, duration_minutes, monthly_price_inr').eq('active', true).order('walks_per_day'),
       supabase.from('dog_subscriptions').select('id, dog_id, walks_per_day, duration_minutes, monthly_price_inr, starts_on, ends_on, status').eq('customer_id', userId).order('created_at', { ascending: false }),
+      supabase.from('pay_later_requests').select('id, dog_id, status, created_at').eq('customer_id', userId).order('created_at', { ascending: false }),
+      supabase.from('subscription_walk_schedules').select('id, subscription_id, dog_id, morning_time, evening_time, service_address, service_latitude, service_longitude, customer_notes').eq('customer_id', userId),
+      supabase.from('subscription_schedule_change_requests').select('id, dog_id, status, admin_note, created_at').eq('customer_id', userId).order('created_at', { ascending: false }),
     ]);
-    const failed = dogResult.error || packageResult.error || subscriptionResult.error;
+    const failed = dogResult.error || packageResult.error || subscriptionResult.error || payLaterResult.error || scheduleResult.error || scheduleChangeResult.error;
     if (failed) setError('जानकारी load नहीं हुई: ' + failed.message);
     else {
       setDogs((dogResult.data ?? []) as Dog[]);
+      if (!selectedDogId && dogResult.data?.length) {
+        const firstDog = dogResult.data[0] as Dog;
+        const firstSchedule = (scheduleResult.data ?? []).find((item) => item.dog_id === firstDog.id) as WalkSchedule | undefined;
+        setSelectedDogId(firstDog.id);
+        setBookingAddress(firstSchedule?.service_address || firstDog.service_address || '');
+        setBookingLatitude(firstSchedule?.service_latitude ?? firstDog.service_latitude);
+        setBookingLongitude(firstSchedule?.service_longitude ?? firstDog.service_longitude);
+        setScheduleMorningTime(firstSchedule?.morning_time?.slice(0,5) || '08:00');
+        setScheduleEveningTime(firstSchedule?.evening_time?.slice(0,5) || '18:00');
+        setBookingSlot(firstSchedule?.evening_time && !firstSchedule?.morning_time ? 'evening' : 'morning');
+      }
       setPackages((packageResult.data ?? []) as Package[]);
       setSubscriptions((subscriptionResult.data ?? []) as Subscription[]);
+      setWalkSchedules((scheduleResult.data ?? []) as WalkSchedule[]);
+      setScheduleChangeRequests((scheduleChangeResult.data ?? []) as ScheduleChangeRequest[]);
+      setPayLaterRequests((payLaterResult.data ?? []) as { id: string; dog_id: string; status: string; created_at: string }[]);
     }
     setLoadingData(false);
-  }, [userId, profile?.role]);
+  }, [userId, profile?.role, selectedDogId]);
 
   const loadCustomerWalks = useCallback(async () => {
     if (!supabase || !userId || profile?.role !== 'customer') return;
     const { data: bookings, error: bookingError } = await supabase.from('bookings')
-      .select('id, scheduled_at, status, actual_started_at, actual_ended_at, actual_duration_minutes, walk_report, dog:dogs(name)')
-      .eq('customer_id', userId).in('status', ['in_progress', 'completed'])
+      .select('id, scheduled_at, service_address, service_slot, status, actual_started_at, actual_ended_at, actual_duration_minutes, walk_report, dog:dogs(name)')
+      .eq('customer_id', userId).in('status', ['requested', 'assigned', 'accepted', 'in_progress', 'completed'])
       .order('scheduled_at', { ascending: false }).limit(20);
     if (bookingError) { setError('Walk history load नहीं हुई: ' + bookingError.message); return; }
     const rows = (bookings ?? []) as unknown as CustomerWalk[];
     setCustomerWalks(rows);
+    const { data: changeRows, error: changeError } = await supabase.from('booking_change_requests')
+      .select('id,booking_id,status,proposed_scheduled_at,proposed_service_address,proposed_service_slot,admin_note,created_at')
+      .eq('customer_id', userId).order('created_at', { ascending: false }).limit(30);
+    if (changeError) setError('Change request history load नहीं हुई: ' + changeError.message);
+    else setCustomerChangeRequests((changeRows ?? []) as CustomerChangeRequest[]);
     const ids = rows.map((item) => item.id);
     if (!ids.length) { setCustomerRoutePoints([]); return; }
     const { data: points, error: pointError } = await supabase.from('walker_locations')
@@ -204,7 +262,6 @@ export default function App() {
         ? await Location.requestBackgroundPermissionsAsync()
         : { granted: false };
       if (backgroundAvailable && backgroundPermission.granted) {
-        globalThis.localStorage?.setItem('dojo_active_booking_id', bookingId);
         await Location.startLocationUpdatesAsync(WALK_LOCATION_TASK, {
           accuracy: Location.Accuracy.Balanced,
           timeInterval: 5000,
@@ -260,7 +317,6 @@ export default function App() {
       if (await Location.hasStartedLocationUpdatesAsync(WALK_LOCATION_TASK)) {
         await Location.stopLocationUpdatesAsync(WALK_LOCATION_TASK);
       }
-      globalThis.localStorage?.removeItem('dojo_active_booking_id');
       setWalkReport('');
       setGpsMessage('');
       setMessage('Walk successfully complete हो गई।');
@@ -269,19 +325,179 @@ export default function App() {
     setBusy(false);
   }
 
+  async function captureServiceLocation(forDogProfile = false) {
+    try {
+      const permission = await Location.requestForegroundPermissionsAsync();
+      if (!permission.granted) { setError('Location permission दें या address manually भरें।'); return; }
+      const current = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High });
+      if (forDogProfile) { setDogLatitude(current.coords.latitude); setDogLongitude(current.coords.longitude); }
+      else { setBookingLatitude(current.coords.latitude); setBookingLongitude(current.coords.longitude); }
+      setMessage('Map location attach हो गई है। Address भी सही से भरें।');
+    } catch (e) { setError('Location नहीं मिली: ' + (e instanceof Error ? e.message : 'Unknown error')); }
+  }
+
+  async function saveWeeklyWalkSchedule() {
+    if (!supabase || !selectedDogSubscription) { setError('पहले active package वाला dog चुनें।'); return; }
+    const validTime = (value: string) => /^(?:[01]\d|2[0-3]):[0-5]\d$/.test(value.trim());
+    const morning = selectedDogSubscription.walks_per_day === 2 || bookingSlot === 'morning' ? scheduleMorningTime.trim() : '';
+    const evening = selectedDogSubscription.walks_per_day === 2 || bookingSlot === 'evening' ? scheduleEveningTime.trim() : '';
+    if ((morning && !validTime(morning)) || (evening && !validTime(evening))) { setError('Time HH:MM format में डालें, जैसे 08:00 या 18:30।'); return; }
+    if (!bookingAddress.trim()) { setError('Walk का पूरा service address डालें।'); return; }
+    setBusy(true); setError(''); setMessage('');
+    const { data, error: scheduleError } = await supabase.rpc('customer_set_subscription_walk_schedule', {
+      p_subscription_id: selectedDogSubscription.id, p_morning_time: morning || null,
+      p_evening_time: evening || null, p_service_address: bookingAddress.trim(),
+      p_latitude: bookingLatitude, p_longitude: bookingLongitude,
+      p_customer_notes: bookingNotes.trim() || null,
+    });
+    if (scheduleError) setError('Weekly schedule save नहीं हुआ: ' + scheduleError.message);
+    else {
+      const status = (data as { status?: string } | null)?.status;
+      setMessage(status === 'pending_approval' ? 'Schedule change Admin approval के लिए भेज दिया गया है। Approval तक पुराना schedule चलता रहेगा।' : 'Weekly schedule save हो गया। Monday–Saturday की future walk bookings बनेंगी; Sunday off रहेगा।');
+      await Promise.all([loadCustomerData(), loadCustomerWalks()]);
+    }
+    setBusy(false);
+  }
+
+  async function requestSubscriptionWalk() {
+    if (!supabase || !selectedDogId) {
+      setError('पहले dog चुनें।');
+      return;
+    }
+    const match = /^(\d{4})-(\d{2})-(\d{2})\s+(\d{2}):(\d{2})$/.exec(bookingSchedule.trim());
+    if (!match) {
+      setError('Date और time इस format में डालें: YYYY-MM-DD HH:MM (24-hour)');
+      return;
+    }
+    const [, year, month, day, hour, minute] = match;
+    const scheduled = new Date(Number(year), Number(month) - 1, Number(day), Number(hour), Number(minute));
+    if (
+      scheduled.getFullYear() !== Number(year) ||
+      scheduled.getMonth() !== Number(month) - 1 ||
+      scheduled.getDate() !== Number(day) ||
+      scheduled.getHours() !== Number(hour) ||
+      scheduled.getMinutes() !== Number(minute) ||
+      scheduled.getTime() <= Date.now()
+    ) {
+      setError('कृपया आने वाली सही date और time डालें।');
+      return;
+    }
+    if (!bookingAddress.trim()) {
+      setError('Walk का पूरा address डालें।');
+      return;
+    }
+    setBusy(true); setError(''); setMessage('');
+    const { error: bookingError } = await supabase.rpc('customer_request_subscription_walk_with_slot', {
+      p_dog_id: selectedDogId,
+      p_scheduled_at: scheduled.toISOString(),
+      p_service_address: bookingAddress.trim(),
+      p_customer_notes: bookingNotes.trim() || null,
+      p_latitude: bookingLatitude,
+      p_longitude: bookingLongitude,
+      p_service_slot: bookingSlot,
+    });
+    if (bookingError) setError('Walk request नहीं बनी: ' + bookingError.message);
+    else {
+      setBookingSchedule(''); setBookingNotes(''); setBookingLatitude(null); setBookingLongitude(null);
+      setMessage('Walk request Admin को भेज दी गई है। Approved walker assign होने के बाद status यहाँ दिखेगा।');
+      await loadCustomerWalks();
+    }
+    setBusy(false);
+  }
+
+  async function submitBookingChangeRequest(bookingId: string) {
+    if (!supabase) return;
+    let proposedAt: string | null = null;
+    if (changeSchedule.trim()) {
+      const match = /^(\d{4})-(\d{2})-(\d{2})\s+(\d{2}):(\d{2})$/.exec(changeSchedule.trim());
+      if (!match) { setError('New date/time YYYY-MM-DD HH:MM format में डालें।'); return; }
+      const [, y, m, d, h, min] = match;
+      const dt = new Date(Number(y), Number(m)-1, Number(d), Number(h), Number(min));
+      if (dt.getFullYear() !== Number(y) || dt.getMonth() !== Number(m)-1 || dt.getDate() !== Number(d) || dt.getHours() !== Number(h) || dt.getMinutes() !== Number(min) || dt.getTime() <= Date.now()) { setError('Future की सही date और time डालें।'); return; }
+      proposedAt = dt.toISOString();
+    }
+    if (!proposedAt && !changeAddress.trim() && bookingLatitude === null) { setError('Time, address या map location में कम से कम एक change दें।'); return; }
+    setBusy(true); setError(''); setMessage('');
+    const { error: requestError } = await supabase.rpc('customer_submit_booking_change_request_with_slot', {
+      p_booking_id: bookingId,
+      p_proposed_scheduled_at: proposedAt,
+      p_proposed_service_address: changeAddress.trim() || null,
+      p_proposed_latitude: bookingLatitude,
+      p_proposed_longitude: bookingLongitude,
+      p_customer_note: changeNote.trim() || null,
+      p_proposed_service_slot: customerWalks.find((walk) => walk.id === bookingId)?.service_slot === changeSlot ? null : changeSlot,
+    });
+    if (requestError) setError('Change request submit नहीं हुई: ' + requestError.message);
+    else {
+      setChangeBookingId(''); setChangeSchedule(''); setChangeAddress(''); setChangeNote('');
+      setBookingLatitude(null); setBookingLongitude(null);
+      setMessage('Change request Admin को भेज दी गई है। Approval होने तक पुराना schedule ही active रहेगा।');
+      await loadCustomerWalks();
+    }
+    setBusy(false);
+  }
+
+  async function submitPayLaterRequest() {
+    if (!supabase || !selectedDogId || !selectedPackageId) {
+      setError('पहले dog और package चुनें।');
+      return;
+    }
+    setBusy(true); setError(''); setMessage('');
+    const { error: requestError } = await supabase.rpc('customer_submit_pay_later_request', {
+      p_dog_id: selectedDogId,
+      p_package_id: selectedPackageId,
+    });
+    if (requestError) setError('Pay Later request submit नहीं हुई: ' + requestError.message);
+    else {
+      setSelectedPackageId('');
+      setMessage('Pay Later request Admin को भेज दी गई है। Approval मिलने के बाद ही package शुरू होगा; बकाया आपके account में जुड़ेगा।');
+      await loadCustomerData();
+    }
+    setBusy(false);
+  }
+
+  async function submitPackagePayment() {
+    if (!supabase || !selectedDogId || !selectedPackageId) {
+      setError('पहले dog और package चुनें।');
+      return;
+    }
+    if (upiTransactionRef.trim().length < 6) {
+      setError('Payment के बाद UPI transaction reference / UTR डालें।');
+      return;
+    }
+    setBusy(true); setError(''); setMessage('');
+    const { error: paymentError } = await supabase.rpc('customer_submit_package_payment', {
+      p_dog_id: selectedDogId,
+      p_package_id: selectedPackageId,
+      p_upi_transaction_ref: upiTransactionRef.trim(),
+    });
+    if (paymentError) {
+      setError('Payment request submit नहीं हुई: ' + paymentError.message);
+    } else {
+      setUpiTransactionRef('');
+      setSelectedPackageId('');
+      setMessage('Payment details Admin को भेज दी गई हैं। Verification के बाद package activate होगा।');
+      await loadCustomerData();
+    }
+    setBusy(false);
+  }
+
   async function addDog() {
     if (!supabase || !userId) return;
     if (!dogName.trim()) { setError('कुत्ते का नाम डालें।'); return; }
+    if (!dogServiceAddress.trim()) { setError('Dog का पूरा service address डालें।'); return; }
     const age = dogAge.trim() ? Number(dogAge) : null;
     if (age !== null && (!Number.isFinite(age) || age < 0 || age > 30)) { setError('कृपया सही उम्र डालें।'); return; }
     setBusy(true); setError(''); setMessage('');
     const { error: insertError } = await supabase.from('dogs').insert({
       customer_id: userId, name: dogName.trim(), breed: dogBreed.trim() || null,
       age_years: age, notes: dogNotes.trim() || null,
+      service_address: dogServiceAddress.trim() || null,
+      service_latitude: dogLatitude, service_longitude: dogLongitude,
     });
     if (insertError) setError('Dog profile save नहीं हुआ: ' + insertError.message);
     else {
-      setDogName(''); setDogBreed(''); setDogAge(''); setDogNotes('');
+      setDogName(''); setDogBreed(''); setDogAge(''); setDogNotes(''); setDogServiceAddress(''); setDogLatitude(null); setDogLongitude(null);
       setShowDogForm(false); setMessage('Dog profile सफलतापूर्वक जोड़ दिया गया।');
       await loadCustomerData();
     }
@@ -298,6 +514,15 @@ export default function App() {
   useEffect(() => () => { locationSubscription.current?.remove(); }, []);
 
   const roleText = profile?.role === 'walker' ? 'Walker account' : profile?.role === 'admin' ? 'Admin account' : 'Customer account';
+  const selectedPackage = packages.find((item) => item.id === selectedPackageId);
+  const selectedDogSubscription = subscriptions.find((item) =>
+    item.dog_id === selectedDogId && item.status === 'active' &&
+    item.starts_on <= new Date().toLocaleDateString('en-CA') &&
+    item.ends_on >= new Date().toLocaleDateString('en-CA')
+  );
+  const upiPayUrl = selectedPackage
+    ? 'upi://pay?pa=' + encodeURIComponent(DOJO_UPI_ID) + '&pn=' + encodeURIComponent('Bapan Rajbanshi') + '&am=' + selectedPackage.monthly_price_inr + '&cu=INR&tn=' + encodeURIComponent('DOJO WALK monthly package')
+    : '';
 
   return (
     <KeyboardAvoidingView style={styles.screen} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
@@ -342,16 +567,49 @@ export default function App() {
                 <Text style={styles.label}>Dog name *</Text><TextInput value={dogName} onChangeText={setDogName} placeholder="e.g. Bruno" style={styles.input} maxLength={60} />
                 <Text style={styles.label}>Breed</Text><TextInput value={dogBreed} onChangeText={setDogBreed} placeholder="e.g. Labrador" style={styles.input} maxLength={80} />
                 <Text style={styles.label}>Age in years</Text><TextInput value={dogAge} onChangeText={setDogAge} placeholder="e.g. 2" keyboardType="decimal-pad" style={styles.input} />
+                <Text style={styles.label}>Service address / flat / tower *</Text><TextInput value={dogServiceAddress} onChangeText={setDogServiceAddress} placeholder="Flat, tower, society, Gaur City..." style={styles.input} maxLength={300} />
+                <Pressable style={styles.outlineButton} onPress={() => void captureServiceLocation(true)}><Text style={styles.outlineText}>📍 Use my current location</Text></Pressable>
+                <Text style={styles.footnote}>{dogLatitude !== null ? `Location saved: ${dogLatitude.toFixed(5)}, ${dogLongitude?.toFixed(5)}` : 'Map location optional, address required for service'}</Text>
                 <Text style={styles.label}>Care notes (optional)</Text><TextInput value={dogNotes} onChangeText={setDogNotes} placeholder="Health, behaviour, instructions..." multiline style={[styles.input, styles.multiline]} maxLength={500} />
                 <Pressable style={[styles.primaryButton, busy && styles.disabled]} onPress={() => void addDog()} disabled={busy}>{busy ? <ActivityIndicator color="#fff" /> : <Text style={styles.primaryText}>Save Dog Profile</Text>}</Pressable>
               </View>}
               {loadingData ? <ActivityIndicator color="#F07824" style={{ margin: 20 }} /> : dogs.length === 0 ? <View style={styles.empty}><Text style={styles.emptyTitle}>अभी कोई dog profile नहीं है</Text><Text style={styles.body}>पहले अपने dog की जानकारी जोड़ें। उसके बाद package request की जा सकेगी।</Text></View> : dogs.map((dog) => {
                 const active = subscriptions.find((sub) => sub.dog_id === dog.id && sub.status === 'active');
+                const pending = subscriptions.find((sub) => sub.dog_id === dog.id && sub.status === 'pending_payment');
                 return <View style={styles.dogCard} key={dog.id}>
                   <View style={styles.dogAvatar}><Text style={styles.dogAvatarText}>{dog.name.slice(0, 1).toUpperCase()}</Text></View>
-                  <View style={{ flex: 1 }}><Text style={styles.dogName}>{dog.name}</Text><Text style={styles.dogMeta}>{[dog.breed, dog.age_years !== null ? dog.age_years + ' years' : null].filter(Boolean).join(' · ') || 'Breed and age not added'}</Text><Text style={styles.dogStatus}>{active ? 'Active package · ' + money(active.monthly_price_inr) + '/month' : 'No active package yet'}</Text></View>
+                  <View style={{ flex: 1 }}><Text style={styles.dogName}>{dog.name}</Text><Text style={styles.dogMeta}>{[dog.breed, dog.age_years !== null ? dog.age_years + ' years' : null].filter(Boolean).join(' · ') || 'Breed and age not added'}</Text><Text style={styles.dogStatus}>{active ? 'Active package · ' + money(active.monthly_price_inr) + '/month' : pending ? 'Payment submitted · awaiting Admin verification' : 'No active package yet'}</Text></View>
                 </View>;
               })}
+              <View style={styles.paymentPanel}>
+                <Text style={styles.sectionTitle}>Weekly recurring walk schedule</Text>
+                <Text style={styles.footnote}>एक बार timing set करें। DOJO WALK Monday–Saturday future bookings बनाएगा। Sunday regular package में off है।</Text>
+                <Text style={styles.label}>Dog</Text>
+                <View style={styles.choiceRow}>{dogs.map((dog) => <Pressable key={dog.id} onPress={() => { const savedSchedule = walkSchedules.find((item) => item.dog_id === dog.id); setSelectedDogId(dog.id); setBookingAddress(savedSchedule?.service_address || dog.service_address || ''); setBookingLatitude(savedSchedule?.service_latitude ?? dog.service_latitude); setBookingLongitude(savedSchedule?.service_longitude ?? dog.service_longitude); setScheduleMorningTime(savedSchedule?.morning_time?.slice(0,5) || '08:00'); setScheduleEveningTime(savedSchedule?.evening_time?.slice(0,5) || '18:00'); setBookingSlot(savedSchedule?.evening_time && !savedSchedule?.morning_time ? 'evening' : 'morning'); }} style={[styles.dogChoice, selectedDogId === dog.id && styles.dogChoiceSelected]}><Text style={[styles.dogChoiceText, selectedDogId === dog.id && styles.dogChoiceTextSelected]}>{dog.name}</Text></Pressable>)}</View>
+                {selectedDogSubscription ? <>
+                  <Text style={styles.footnote}>{selectedDogSubscription.walks_per_day === 1 ? '1 walk/day package: Morning या Evening में से एक चुनें।' : '2 walks/day package: Morning और Evening दोनों की timing भरें।'}</Text>
+                  {selectedDogSubscription.walks_per_day === 1 ? <>
+                    <Text style={styles.label}>Daily walk slot</Text>
+                    <View style={styles.choiceRow}><Pressable onPress={() => setBookingSlot('morning')} style={[styles.dogChoice, bookingSlot === 'morning' && styles.dogChoiceSelected]}><Text style={[styles.dogChoiceText, bookingSlot === 'morning' && styles.dogChoiceTextSelected]}>Morning</Text></Pressable><Pressable onPress={() => setBookingSlot('evening')} style={[styles.dogChoice, bookingSlot === 'evening' && styles.dogChoiceSelected]}><Text style={[styles.dogChoiceText, bookingSlot === 'evening' && styles.dogChoiceTextSelected]}>Evening</Text></Pressable></View>
+                    <Text style={styles.label}>Daily time · 24-hour HH:MM</Text>
+                    <TextInput value={bookingSlot === 'morning' ? scheduleMorningTime : scheduleEveningTime} onChangeText={bookingSlot === 'morning' ? setScheduleMorningTime : setScheduleEveningTime} placeholder={bookingSlot === 'morning' ? '08:00' : '18:00'} style={styles.input} autoCapitalize="none" />
+                  </> : <>
+                    <Text style={styles.label}>Morning time · 04:00–11:59</Text>
+                    <TextInput value={scheduleMorningTime} onChangeText={setScheduleMorningTime} placeholder="08:00" style={styles.input} autoCapitalize="none" />
+                    <Text style={styles.label}>Evening time · 12:00–23:59</Text>
+                    <TextInput value={scheduleEveningTime} onChangeText={setScheduleEveningTime} placeholder="18:00" style={styles.input} autoCapitalize="none" />
+                  </>}
+                  <Text style={styles.label}>Full service address *</Text>
+                  <TextInput value={bookingAddress} onChangeText={setBookingAddress} placeholder="Flat, tower, society, Gaur City..." style={styles.input} maxLength={300} />
+                  <Pressable style={styles.outlineButton} onPress={() => void captureServiceLocation(false)}><Text style={styles.outlineText}>📍 Share pickup location</Text></Pressable>
+                  <Text style={styles.footnote}>{bookingLatitude !== null ? `Pickup pin: ${bookingLatitude.toFixed(5)}, ${bookingLongitude?.toFixed(5)}` : 'Map pin optional; complete address required'}</Text>
+                  <Text style={styles.label}>Walker instructions (optional)</Text>
+                  <TextInput value={bookingNotes} onChangeText={setBookingNotes} placeholder="Gate entry, leash, behaviour notes..." multiline style={[styles.input, styles.multiline]} maxLength={1000} />
+                  {walkSchedules.filter((item) => item.subscription_id === selectedDogSubscription.id).map((item) => <View key={item.id} style={styles.empty}><Text style={styles.body}>Current schedule: {item.morning_time ? 'Morning ' + item.morning_time.slice(0,5) : ''}{item.morning_time && item.evening_time ? ' · ' : ''}{item.evening_time ? 'Evening ' + item.evening_time.slice(0,5) : ''}</Text><Text style={styles.body}>{item.service_address}</Text></View>)}
+                  {scheduleChangeRequests.filter((item) => item.dog_id === selectedDogSubscription.dog_id).slice(0,2).map((item) => <Text key={item.id} style={styles.footnote}>Schedule change {item.status} · {item.admin_note || (item.status === 'pending' ? 'Old schedule remains active' : 'Admin reviewed the request')}</Text>)}
+                  <Pressable style={[styles.primaryButton, busy && styles.disabled]} onPress={() => void saveWeeklyWalkSchedule()} disabled={busy}>{busy ? <ActivityIndicator color="#fff" /> : <Text style={styles.primaryText}>Save weekly schedule</Text>}</Pressable>
+                </> : <Text style={styles.body}>इस dog के लिए active monthly package नहीं है। पहले package activate करवाएँ।</Text>}
+              </View>
               <View style={styles.sectionHeader}><View><Text style={styles.sectionTitle}>Walk Tracking & History</Text><Text style={styles.sectionHint}>Active walk की latest location और completed route points</Text></View><Pressable style={styles.smallPrimary} onPress={() => void loadCustomerWalks()}><Text style={styles.smallPrimaryText}>Refresh</Text></Pressable></View>
               {customerWalks.length === 0 ? <View style={styles.empty}><Text style={styles.emptyTitle}>अभी कोई active या completed walk नहीं है</Text><Text style={styles.body}>Walk शुरू होने के बाद location और route यहाँ दिखाई देंगे।</Text></View> : customerWalks.map((walk) => {
                 const points = customerRoutePoints.filter((point) => point.booking_id === walk.id);
@@ -360,22 +618,54 @@ export default function App() {
                 const mapUrl = latest ? 'https://www.openstreetmap.org/?mlat=' + latest.latitude + '&mlon=' + latest.longitude + '#map=17/' + latest.latitude + '/' + latest.longitude : '';
                 return <View style={styles.dogCard} key={walk.id}>
                   <View style={{ flex: 1 }}>
-                    <Text style={styles.dogName}>{walk.dog?.name || 'Dog walk'} · {walk.status === 'in_progress' ? 'Live walk' : 'Completed'}</Text>
+                    <Text style={styles.dogName}>{walk.dog?.name || 'Dog walk'} · {walk.status === 'in_progress' ? 'Live walk' : walk.status === 'completed' ? 'Completed' : walk.status.charAt(0).toUpperCase() + walk.status.slice(1)}</Text>
                     <Text style={styles.dogMeta}>{new Date(walk.scheduled_at).toLocaleString('en-IN', { dateStyle: 'medium', timeStyle: 'short' })}</Text>
                     <Text style={styles.dogMeta}>{points.length} GPS points recorded</Text>
+                    <Text style={styles.dogMeta}>{walk.service_slot ? walk.service_slot.toUpperCase() + ' · ' : ''}{walk.service_address}</Text>
                     {walk.actual_duration_minutes ? <Text style={styles.dogMeta}>Duration: {walk.actual_duration_minutes} minutes</Text> : null}
+                    {['requested','assigned','accepted'].includes(walk.status) ? <Pressable style={styles.outlineButton} onPress={() => { setChangeBookingId(changeBookingId === walk.id ? '' : walk.id); setChangeSchedule(''); setChangeAddress(''); setChangeSlot(walk.service_slot === 'evening' ? 'evening' : 'morning'); setChangeNote(''); setBookingLatitude(null); setBookingLongitude(null); }}><Text style={styles.outlineText}>{changeBookingId === walk.id ? 'Close change form' : 'Request time / address change'}</Text></Pressable> : null}
+                    {changeBookingId === walk.id ? <View style={styles.paymentPanel}>
+                      <Text style={styles.label}>New date & exact time (optional) · YYYY-MM-DD HH:MM</Text><TextInput value={changeSchedule} onChangeText={setChangeSchedule} placeholder="2026-11-25 08:00" style={styles.input} />
+                      <Text style={styles.label}>New slot</Text><View style={styles.choiceRow}><Pressable onPress={() => setChangeSlot('morning')} style={[styles.dogChoice, changeSlot === 'morning' && styles.dogChoiceSelected]}><Text style={[styles.dogChoiceText, changeSlot === 'morning' && styles.dogChoiceTextSelected]}>Morning</Text></Pressable><Pressable onPress={() => setChangeSlot('evening')} style={[styles.dogChoice, changeSlot === 'evening' && styles.dogChoiceSelected]}><Text style={[styles.dogChoiceText, changeSlot === 'evening' && styles.dogChoiceTextSelected]}>Evening</Text></Pressable></View>
+                      <Text style={styles.label}>New address (optional)</Text><TextInput value={changeAddress} onChangeText={setChangeAddress} placeholder="New flat / tower / gate..." style={styles.input} maxLength={300} />
+                      <Pressable style={styles.outlineButton} onPress={() => void captureServiceLocation(false)}><Text style={styles.outlineText}>📍 Share new location pin</Text></Pressable>
+                      <Text style={styles.label}>Reason / note</Text><TextInput value={changeNote} onChangeText={setChangeNote} placeholder="Please explain the change" style={styles.input} maxLength={1000} />
+                      <Pressable style={[styles.primaryButton, busy && styles.disabled]} onPress={() => void submitBookingChangeRequest(walk.id)} disabled={busy}><Text style={styles.primaryText}>Send change request</Text></Pressable>
+                    </View> : null}
                     {walk.walk_report ? <Text style={styles.dogMeta}>Walker report: {walk.walk_report}</Text> : null}
                     {latest ? <><Text style={styles.dogMeta}>Latest GPS: {latest.latitude.toFixed(5)}, {latest.longitude.toFixed(5)}</Text><Pressable style={styles.textButton} onPress={() => void Linking.openURL(mapUrl)}><Text style={styles.textButtonLabel}>Open latest location in map ↗</Text></Pressable></> : <Text style={styles.dogMeta}>GPS location अभी उपलब्ध नहीं है।</Text>}
                     {first && latest && points.length > 1 ? <Text style={styles.dogMeta}>Route range: {first.latitude.toFixed(5)}, {first.longitude.toFixed(5)} → {latest.latitude.toFixed(5)}, {latest.longitude.toFixed(5)}</Text> : null}
                   </View>
                 </View>;
               })}
+              {customerChangeRequests.length > 0 ? <View style={styles.notice}><Text style={styles.noticeTitle}>Change request status</Text>{customerChangeRequests.slice(0,6).map((request) => <Text key={request.id} style={styles.noticeBody}>{request.status.toUpperCase()} · {request.proposed_scheduled_at ? new Date(request.proposed_scheduled_at).toLocaleString('en-IN') : 'Schedule unchanged'}{request.proposed_service_slot ? ' · ' + request.proposed_service_slot : ''}{request.admin_note ? ' · Admin: ' + request.admin_note : ''}</Text>)}</View> : null}
               <View style={styles.sectionHeader}><View><Text style={styles.sectionTitle}>Monthly Packages</Text><Text style={styles.sectionHint}>Monday–Saturday · प्रति dog अलग package</Text></View></View>
-              {packages.length === 0 ? <Text style={styles.body}>Packages अभी load नहीं हुए। Refresh करके देखें।</Text> : packages.map((item) => <View style={styles.packageCard} key={item.id}>
-                <View style={{ flex: 1 }}><Text style={styles.packageTitle}>{item.walks_per_day === 1 ? 'Daily Walk' : item.walks_per_day + ' Walks Daily'}</Text><Text style={styles.packageHint}>{item.duration_minutes} minutes per walk · Monday–Saturday</Text></View>
+              {dogs.length > 0 ? <>
+                <Text style={styles.label}>किस dog के लिए package चाहिए?</Text>
+                <View style={styles.choiceRow}>{dogs.map((dog) => <Pressable key={dog.id} onPress={() => setSelectedDogId(dog.id)} style={[styles.dogChoice, selectedDogId === dog.id && styles.dogChoiceSelected]}><Text style={[styles.dogChoiceText, selectedDogId === dog.id && styles.dogChoiceTextSelected]}>{dog.name}</Text></Pressable>)}</View>
+              </> : <Text style={styles.body}>Package लेने से पहले अपना dog profile जोड़ें।</Text>}
+              {packages.length === 0 ? <Text style={styles.body}>Packages अभी load नहीं हुए। Refresh करके देखें।</Text> : packages.map((item) => <Pressable style={[styles.packageCard, selectedPackageId === item.id && styles.packageCardSelected]} key={item.id} onPress={() => { setSelectedPackageId(item.id); setUpiTransactionRef(''); setError(''); }}>
+                <View style={{ flex: 1 }}><Text style={styles.packageTitle}>{item.walks_per_day === 1 ? 'Daily Walk' : item.walks_per_day + ' Walks Daily'}</Text><Text style={styles.packageHint}>{item.duration_minutes} minutes per walk · Monday–Saturday</Text><Text style={styles.packageHint}>{selectedPackageId === item.id ? 'Selected' : 'Tap to select'}</Text></View>
                 <View style={{ alignItems: 'flex-end' }}><Text style={styles.packagePrice}>{money(item.monthly_price_inr)}</Text><Text style={styles.packageHint}>per month</Text></View>
-              </View>)}
-              <View style={styles.notice}><Text style={styles.noticeTitle}>Package activation</Text><Text style={styles.noticeBody}>Package चुनने और UPI payment के बाद Admin verification से subscription activate होगा। फिलहाल इस app में package request और payment submit सुविधा अगली stage में जोड़ी जाएगी।</Text></View>
+              </Pressable>)}
+              {selectedPackage ? <View style={styles.paymentPanel}>
+                <Text style={styles.sectionTitle}>Choose payment method</Text>
+                <Pressable style={[styles.primaryButton, busy && styles.disabled]} onPress={() => void submitPayLaterRequest()} disabled={busy || !selectedDogId}>
+                  {busy ? <ActivityIndicator color="#fff" /> : <Text style={styles.primaryText}>Pay Later · Admin approval required</Text>}
+                </Pressable>
+                <Text style={styles.footnote}>अभी payment किए बिना request भेजें। Admin approve करेगा तभी package active होगा और monthly amount आपके बकाया में जुड़ेगा।</Text>
+                <Text style={styles.sectionTitle}>या अभी UPI से भुगतान करें</Text>
+                <Text style={styles.body}>QR scan करें या नीचे दिए UPI ID पर {money(selectedPackage.monthly_price_inr)} भेजें। Payee name: Bapan Rajbanshi.</Text>
+                <Image source={{ uri: 'data:image/png;base64,' + PHONEPE_QR_BASE64 }} style={styles.paymentQr} resizeMode="contain" />
+                <Text style={styles.upiId}>{DOJO_UPI_ID}</Text>
+                <Pressable style={styles.outlineButton} onPress={() => void Linking.openURL('upi://pay?pa=' + encodeURIComponent(DOJO_UPI_ID) + '&pn=' + encodeURIComponent('Bapan Rajbanshi') + '&am=' + selectedPackage.monthly_price_inr + '&cu=INR&tn=' + encodeURIComponent('DOJO WALK monthly package')).catch(() => setError('UPI app नहीं खुला। QR scan करके payment करें।'))}><Text style={styles.outlineText}>Open UPI App · {money(selectedPackage.monthly_price_inr)}</Text></Pressable>
+                <Text style={styles.label}>UPI transaction reference / UTR *</Text>
+                <TextInput value={upiTransactionRef} onChangeText={setUpiTransactionRef} placeholder="Payment के बाद UTR number डालें" style={styles.input} autoCapitalize="characters" maxLength={100} />
+                <Pressable style={[styles.primaryButton, (busy || !selectedDogId) && styles.disabled]} onPress={() => void submitPackagePayment()} disabled={busy || !selectedDogId}>{busy ? <ActivityIndicator color="#fff" /> : <Text style={styles.primaryText}>Submit Payment Details</Text>}</Pressable>
+                <Text style={styles.footnote}>Payment तभी submit करें जब PhonePe में transaction successful दिखे। Package Admin verification के बाद ही चालू होगा।</Text>
+              </View> : null}
+              {payLaterRequests.length > 0 ? <View style={styles.notice}><Text style={styles.noticeTitle}>Pay Later requests</Text>{payLaterRequests.slice(0,5).map((request) => <Text key={request.id} style={styles.noticeBody}>{dogs.find((dog) => dog.id === request.dog_id)?.name || 'Dog'} · {request.status === 'pending' ? 'Admin approval pending' : request.status === 'approved' ? 'Approved' : 'Rejected'} · {new Date(request.created_at).toLocaleDateString('en-IN')}</Text>)}</View> : null}
+              <View style={styles.notice}><Text style={styles.noticeTitle}>Payment verification</Text><Text style={styles.noticeBody}>आपका payment reference Admin verify करेगा। App payment को अपने-आप successful नहीं मानेगा।</Text></View>
               <Pressable style={styles.textButton} onPress={() => void loadCustomerData()}><Text style={styles.textButtonLabel}>↻ Refresh my details</Text></Pressable>
             </> : profile.role === 'walker' ? <>
               <View style={styles.sectionHeader}><View><Text style={styles.sectionTitle}>मेरी Assigned Walks</Text><Text style={styles.sectionHint}>सिर्फ आपको assign की गई walks दिखाई जाती हैं।</Text></View><Pressable style={styles.smallPrimary} onPress={() => void loadWalkerData()}><Text style={styles.smallPrimaryText}>Refresh</Text></Pressable></View>
@@ -453,6 +743,15 @@ const styles = StyleSheet.create({
   empty: { backgroundColor: '#fff', borderRadius: 14, borderWidth: 1, borderColor: '#F0E7E0', padding: 18, marginBottom: 15 },
   emptyTitle: { color: '#333', fontWeight: '800', fontSize: 13 },
   packageCard: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#fff', borderRadius: 14, padding: 16, borderWidth: 1, borderColor: '#F0E7E0', marginBottom: 9 },
+  packageCardSelected: { borderColor: '#F07824', borderWidth: 2 },
+  choiceRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 12 },
+  dogChoice: { borderWidth: 1, borderColor: '#E8DED6', borderRadius: 20, paddingVertical: 8, paddingHorizontal: 14, backgroundColor: '#fff' },
+  dogChoiceSelected: { backgroundColor: '#FFF1E7', borderColor: '#F07824' },
+  dogChoiceText: { color: '#555', fontWeight: '700', fontSize: 12 },
+  dogChoiceTextSelected: { color: '#A64D13' },
+  paymentPanel: { backgroundColor: '#fff', borderRadius: 16, padding: 16, borderWidth: 1, borderColor: '#F0E7E0', marginVertical: 10 },
+  paymentQr: { width: 230, height: 230, alignSelf: 'center', marginVertical: 10 },
+  upiId: { color: '#242424', fontWeight: '900', fontSize: 16, textAlign: 'center', marginBottom: 12 },
   packageTitle: { color: '#242424', fontWeight: '800', fontSize: 13 },
   packageHint: { color: '#888', fontSize: 10, marginTop: 4 },
   packagePrice: { color: '#F07824', fontSize: 17, fontWeight: '900' },
