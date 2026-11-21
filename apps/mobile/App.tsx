@@ -3,7 +3,7 @@ import { StatusBar } from 'expo-status-bar';
 import * as Location from 'expo-location';
 import * as TaskManager from 'expo-task-manager';
 import {
-  ActivityIndicator, KeyboardAvoidingView, Linking, Platform, Pressable,
+  ActivityIndicator, Image, KeyboardAvoidingView, Linking, Platform, Pressable,
   ScrollView, StyleSheet, Text, TextInput, View,
 } from 'react-native';
 import { isSupabaseConfigured, supabase } from './lib/supabase';
@@ -17,6 +17,8 @@ type RoutePoint = { id: number; booking_id: string; latitude: number; longitude:
 type AssignedWalk = { id: string; scheduled_at: string; duration_minutes: number; service_address: string; customer_notes: string | null; status: string; actual_started_at: string | null; actual_ended_at: string | null; actual_duration_minutes: number | null; walk_report: string | null; dog: { name: string; breed: string | null } | null };
 
 const WALK_LOCATION_TASK = 'dojo-walk-active-route';
+const PHONEPE_QR_BASE64 = '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';
+const DOJO_UPI_ID = '9625813987-4@axl';
 
 TaskManager.defineTask(WALK_LOCATION_TASK, async ({ data, error }) => {
   if (error || !supabase) return;
@@ -59,6 +61,9 @@ export default function App() {
   const [dogs, setDogs] = useState<Dog[]>([]);
   const [packages, setPackages] = useState<Package[]>([]);
   const [subscriptions, setSubscriptions] = useState<Subscription[]>([]);
+  const [selectedDogId, setSelectedDogId] = useState('');
+  const [selectedPackageId, setSelectedPackageId] = useState('');
+  const [upiTransactionRef, setUpiTransactionRef] = useState('');
   const [assignedWalks, setAssignedWalks] = useState<AssignedWalk[]>([]);
   const [customerWalks, setCustomerWalks] = useState<CustomerWalk[]>([]);
   const [customerRoutePoints, setCustomerRoutePoints] = useState<RoutePoint[]>([]);
@@ -99,11 +104,12 @@ export default function App() {
     if (failed) setError('जानकारी load नहीं हुई: ' + failed.message);
     else {
       setDogs((dogResult.data ?? []) as Dog[]);
+      if (!selectedDogId && dogResult.data?.length) setSelectedDogId(dogResult.data[0].id);
       setPackages((packageResult.data ?? []) as Package[]);
       setSubscriptions((subscriptionResult.data ?? []) as Subscription[]);
     }
     setLoadingData(false);
-  }, [userId, profile?.role]);
+  }, [userId, profile?.role, selectedDogId]);
 
   const loadCustomerWalks = useCallback(async () => {
     if (!supabase || !userId || profile?.role !== 'customer') return;
@@ -269,6 +275,32 @@ export default function App() {
     setBusy(false);
   }
 
+  async function submitPackagePayment() {
+    if (!supabase || !selectedDogId || !selectedPackageId) {
+      setError('पहले dog और package चुनें।');
+      return;
+    }
+    if (upiTransactionRef.trim().length < 6) {
+      setError('Payment के बाद UPI transaction reference / UTR डालें।');
+      return;
+    }
+    setBusy(true); setError(''); setMessage('');
+    const { error: paymentError } = await supabase.rpc('customer_submit_package_payment', {
+      p_dog_id: selectedDogId,
+      p_package_id: selectedPackageId,
+      p_upi_transaction_ref: upiTransactionRef.trim(),
+    });
+    if (paymentError) {
+      setError('Payment request submit नहीं हुई: ' + paymentError.message);
+    } else {
+      setUpiTransactionRef('');
+      setSelectedPackageId('');
+      setMessage('Payment details Admin को भेज दी गई हैं। Verification के बाद package activate होगा।');
+      await loadCustomerData();
+    }
+    setBusy(false);
+  }
+
   async function addDog() {
     if (!supabase || !userId) return;
     if (!dogName.trim()) { setError('कुत्ते का नाम डालें।'); return; }
@@ -298,6 +330,10 @@ export default function App() {
   useEffect(() => () => { locationSubscription.current?.remove(); }, []);
 
   const roleText = profile?.role === 'walker' ? 'Walker account' : profile?.role === 'admin' ? 'Admin account' : 'Customer account';
+  const selectedPackage = packages.find((item) => item.id === selectedPackageId);
+  const upiPayUrl = selectedPackage
+    ? 'upi://pay?pa=' + encodeURIComponent(DOJO_UPI_ID) + '&pn=' + encodeURIComponent('Bapan Rajbanshi') + '&am=' + selectedPackage.monthly_price_inr + '&cu=INR&tn=' + encodeURIComponent('DOJO WALK monthly package')
+    : '';
 
   return (
     <KeyboardAvoidingView style={styles.screen} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
@@ -371,11 +407,26 @@ export default function App() {
                 </View>;
               })}
               <View style={styles.sectionHeader}><View><Text style={styles.sectionTitle}>Monthly Packages</Text><Text style={styles.sectionHint}>Monday–Saturday · प्रति dog अलग package</Text></View></View>
-              {packages.length === 0 ? <Text style={styles.body}>Packages अभी load नहीं हुए। Refresh करके देखें।</Text> : packages.map((item) => <View style={styles.packageCard} key={item.id}>
-                <View style={{ flex: 1 }}><Text style={styles.packageTitle}>{item.walks_per_day === 1 ? 'Daily Walk' : item.walks_per_day + ' Walks Daily'}</Text><Text style={styles.packageHint}>{item.duration_minutes} minutes per walk · Monday–Saturday</Text></View>
+              {dogs.length > 0 ? <>
+                <Text style={styles.label}>किस dog के लिए package चाहिए?</Text>
+                <View style={styles.choiceRow}>{dogs.map((dog) => <Pressable key={dog.id} onPress={() => setSelectedDogId(dog.id)} style={[styles.dogChoice, selectedDogId === dog.id && styles.dogChoiceSelected]}><Text style={[styles.dogChoiceText, selectedDogId === dog.id && styles.dogChoiceTextSelected]}>{dog.name}</Text></Pressable>)}</View>
+              </> : <Text style={styles.body}>Package लेने से पहले अपना dog profile जोड़ें।</Text>}
+              {packages.length === 0 ? <Text style={styles.body}>Packages अभी load नहीं हुए। Refresh करके देखें।</Text> : packages.map((item) => <Pressable style={[styles.packageCard, selectedPackageId === item.id && styles.packageCardSelected]} key={item.id} onPress={() => { setSelectedPackageId(item.id); setUpiTransactionRef(''); setError(''); }}>
+                <View style={{ flex: 1 }}><Text style={styles.packageTitle}>{item.walks_per_day === 1 ? 'Daily Walk' : item.walks_per_day + ' Walks Daily'}</Text><Text style={styles.packageHint}>{item.duration_minutes} minutes per walk · Monday–Saturday</Text><Text style={styles.packageHint}>{selectedPackageId === item.id ? 'Selected' : 'Tap to select'}</Text></View>
                 <View style={{ alignItems: 'flex-end' }}><Text style={styles.packagePrice}>{money(item.monthly_price_inr)}</Text><Text style={styles.packageHint}>per month</Text></View>
-              </View>)}
-              <View style={styles.notice}><Text style={styles.noticeTitle}>Package activation</Text><Text style={styles.noticeBody}>Package चुनने और UPI payment के बाद Admin verification से subscription activate होगा। फिलहाल इस app में package request और payment submit सुविधा अगली stage में जोड़ी जाएगी।</Text></View>
+              </Pressable>)}
+              {selectedPackage ? <View style={styles.paymentPanel}>
+                <Text style={styles.sectionTitle}>Pay with PhonePe / UPI</Text>
+                <Text style={styles.body}>QR scan करें या नीचे दिए UPI ID पर {money(selectedPackage.monthly_price_inr)} भेजें। Payee name: Bapan Rajbanshi.</Text>
+                <Image source={{ uri: 'data:image/png;base64,' + PHONEPE_QR_BASE64 }} style={styles.paymentQr} resizeMode="contain" />
+                <Text style={styles.upiId}>{DOJO_UPI_ID}</Text>
+                <Pressable style={styles.outlineButton} onPress={() => void Linking.openURL('upi://pay?pa=' + encodeURIComponent(DOJO_UPI_ID) + '&pn=' + encodeURIComponent('Bapan Rajbanshi') + '&am=' + selectedPackage.monthly_price_inr + '&cu=INR&tn=' + encodeURIComponent('DOJO WALK monthly package')).catch(() => setError('UPI app नहीं खुला। QR scan करके payment करें।'))}><Text style={styles.outlineText}>Open UPI App · {money(selectedPackage.monthly_price_inr)}</Text></Pressable>
+                <Text style={styles.label}>UPI transaction reference / UTR *</Text>
+                <TextInput value={upiTransactionRef} onChangeText={setUpiTransactionRef} placeholder="Payment के बाद UTR number डालें" style={styles.input} autoCapitalize="characters" maxLength={100} />
+                <Pressable style={[styles.primaryButton, (busy || !selectedDogId) && styles.disabled]} onPress={() => void submitPackagePayment()} disabled={busy || !selectedDogId}>{busy ? <ActivityIndicator color="#fff" /> : <Text style={styles.primaryText}>Submit Payment Details</Text>}</Pressable>
+                <Text style={styles.footnote}>Payment तभी submit करें जब PhonePe में transaction successful दिखे। Package Admin verification के बाद ही चालू होगा।</Text>
+              </View> : null}
+              <View style={styles.notice}><Text style={styles.noticeTitle}>Payment verification</Text><Text style={styles.noticeBody}>आपका payment reference Admin verify करेगा। App payment को अपने-आप successful नहीं मानेगा।</Text></View>
               <Pressable style={styles.textButton} onPress={() => void loadCustomerData()}><Text style={styles.textButtonLabel}>↻ Refresh my details</Text></Pressable>
             </> : profile.role === 'walker' ? <>
               <View style={styles.sectionHeader}><View><Text style={styles.sectionTitle}>मेरी Assigned Walks</Text><Text style={styles.sectionHint}>सिर्फ आपको assign की गई walks दिखाई जाती हैं।</Text></View><Pressable style={styles.smallPrimary} onPress={() => void loadWalkerData()}><Text style={styles.smallPrimaryText}>Refresh</Text></Pressable></View>
@@ -453,6 +504,15 @@ const styles = StyleSheet.create({
   empty: { backgroundColor: '#fff', borderRadius: 14, borderWidth: 1, borderColor: '#F0E7E0', padding: 18, marginBottom: 15 },
   emptyTitle: { color: '#333', fontWeight: '800', fontSize: 13 },
   packageCard: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#fff', borderRadius: 14, padding: 16, borderWidth: 1, borderColor: '#F0E7E0', marginBottom: 9 },
+  packageCardSelected: { borderColor: '#F07824', borderWidth: 2 },
+  choiceRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 12 },
+  dogChoice: { borderWidth: 1, borderColor: '#E8DED6', borderRadius: 20, paddingVertical: 8, paddingHorizontal: 14, backgroundColor: '#fff' },
+  dogChoiceSelected: { backgroundColor: '#FFF1E7', borderColor: '#F07824' },
+  dogChoiceText: { color: '#555', fontWeight: '700', fontSize: 12 },
+  dogChoiceTextSelected: { color: '#A64D13' },
+  paymentPanel: { backgroundColor: '#fff', borderRadius: 16, padding: 16, borderWidth: 1, borderColor: '#F0E7E0', marginVertical: 10 },
+  paymentQr: { width: 230, height: 230, alignSelf: 'center', marginVertical: 10 },
+  upiId: { color: '#242424', fontWeight: '900', fontSize: 16, textAlign: 'center', marginBottom: 12 },
   packageTitle: { color: '#242424', fontWeight: '800', fontSize: 13 },
   packageHint: { color: '#888', fontSize: 10, marginTop: 4 },
   packagePrice: { color: '#F07824', fontSize: 17, fontWeight: '900' },
