@@ -20,6 +20,7 @@
     "expo-task-manager": "~14.0.8"
   },
   "devDependencies": {
-    "typescript": "~5.9.2"
+    "typescript": "~5.9.2",
+    "@types/react": "~19.1.10"
   }
 }
