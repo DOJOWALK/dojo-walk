@@ -5,6 +5,7 @@ type AdminProfile = { role: string };
 type WalkerAdmin = { id: string; service_areas: string[]; experience_years: number; verification_status: string; profile: { full_name: string | null; phone: string | null } | null };
 type AssignmentBooking = { id: string; scheduled_at: string; duration_minutes: number; service_address: string; status: string; walker_id: string | null; dog: { name: string } | null; customer: { full_name: string | null; phone: string | null } | null };
 type PricingRow = { id: string; duration_minutes: number; price_inr: number; is_active: boolean };
+type AdminCustomer = { id: string; full_name: string | null; phone: string | null; dogs: { id: string; name: string; breed: string | null; age_years: number | null }[] };
 type WalkerPayout = { id: string; walker_id: string; payout_month: string; gross_amount_inr: number; paid_amount_inr: number; status: string; walker: { profile: { full_name: string | null; phone: string | null } | null } | null };
 type Booking = {
   id: string;
@@ -86,6 +87,7 @@ export default function App() {
   const [walkerSelections, setWalkerSelections] = useState<Record<string, string>>({});
   const [pricingInputs, setPricingInputs] = useState<Record<string, string>>({});
   const [walkerPayouts, setWalkerPayouts] = useState<WalkerPayout[]>([]);
+  const [adminCustomers, setAdminCustomers] = useState<AdminCustomer[]>([]);
   const [operationsBusy, setOperationsBusy] = useState(false);
   const [operationsMessage, setOperationsMessage] = useState('');
 
@@ -215,7 +217,7 @@ export default function App() {
   const loadOperations = useCallback(async () => {
     if (!supabase) return;
     setOperationsBusy(true);
-    const [walkerResult, bookingResult, pricingResult, payoutResult] = await Promise.all([
+    const [walkerResult, bookingResult, pricingResult, payoutResult, customerResult] = await Promise.all([
       supabase.from('walkers')
         .select('id,service_areas,experience_years,verification_status,profile:profiles!walkers_id_fkey(full_name,phone)')
         .order('created_at', { ascending: false }),
@@ -226,8 +228,11 @@ export default function App() {
       supabase.from('walker_payouts')
         .select('id,walker_id,payout_month,gross_amount_inr,paid_amount_inr,status,walker:walkers!walker_payouts_walker_id_fkey(profile:profiles!walkers_id_fkey(full_name,phone))')
         .order('payout_month', { ascending: false }).limit(100),
+      supabase.from('profiles')
+        .select('id,full_name,phone,dogs:dogs!dogs_customer_id_fkey(id,name,breed,age_years)')
+        .eq('role', 'customer').order('full_name'),
     ]);
-    const failed = walkerResult.error || bookingResult.error || pricingResult.error || payoutResult.error;
+    const failed = walkerResult.error || bookingResult.error || pricingResult.error || payoutResult.error || customerResult.error;
     if (failed) setOperationsMessage('Management data load नहीं हुआ: ' + failed.message);
     else {
       setWalkersAdmin((walkerResult.data ?? []) as unknown as WalkerAdmin[]);
@@ -236,6 +241,7 @@ export default function App() {
       setPricingRows(rows);
       setPricingInputs(Object.fromEntries(rows.map((row) => [row.id, String(row.price_inr)])));
       setWalkerPayouts((payoutResult.data ?? []) as unknown as WalkerPayout[]);
+      setAdminCustomers((customerResult.data ?? []) as unknown as AdminCustomer[]);
       setOperationsMessage('');
     }
     setOperationsBusy(false);
@@ -520,6 +526,10 @@ export default function App() {
             {payments.length === 0 ? <p className="empty">कोई pending payment नहीं है।</p> : <div className="payment-list">{payments.map((payment) => <div className="payment-row payment-review-row" key={payment.id}><div><strong>{money(payment.amount_inr)} · {payment.subscription?.dogs?.name || 'Dog not found'}</strong><small>{payment.customer?.full_name || 'Customer'} {payment.customer?.phone ? '· ' + payment.customer.phone : ''}</small><small>UTR: {payment.upi_transaction_ref || 'Not entered'}</small><small>{dateTime(payment.submitted_at)}</small><div className="payment-actions"><button className="refresh approve" onClick={() => void reviewPayment(payment.id, 'verified')}>Verify & activate</button><button className="refresh reject" onClick={() => void reviewPayment(payment.id, 'rejected')}>Reject</button></div></div><span className="pill pending">Pending</span></div>)}</div>}
             <p className="notice inline-notice">हर UTR को अपने PhonePe / bank statement में मिलाने के बाद ही Verify करें। Verify करने पर subscription आज से active होगा। Reject करने पर pending subscription cancel होगा।</p>
           </article>
+        </section>
+        <section className="panel route-panel" id="dogs">
+          <div className="panel-heading"><div><h3>Customers & dogs</h3><p>Every dog is listed separately and remains linked to its own customer account and package.</p></div><span className="subtle-count">{adminCustomers.length} customers</span></div>
+          {adminCustomers.length === 0 ? <p className="empty">अभी कोई customer account नहीं है।</p> : <div className="table-wrap"><table><thead><tr><th>Customer</th><th>Phone</th><th>Dogs</th></tr></thead><tbody>{adminCustomers.map((customer) => <tr key={customer.id}><td>{customer.full_name || customer.id.slice(0, 8)}</td><td>{customer.phone || '—'}</td><td>{customer.dogs.length ? customer.dogs.map((dog) => dog.name + (dog.breed ? ' · ' + dog.breed : '')).join(', ') : 'No dog added yet'}</td></tr>)}</tbody></table></div>}
         </section>
         <section className="panel route-panel" id="walkers">
           <div className="panel-heading"><div><h3>Walker management</h3><p>New walker accounts stay pending until Admin approval.</p></div><button className="refresh" onClick={() => void loadOperations()} disabled={operationsBusy}>Refresh</button></div>
