@@ -101,7 +101,9 @@ begin
   ) then raise exception 'This dog already has a Sunday extra walk booked for that date'; end if;
 
   if exists (select 1 from public.subscription_payments sp
-    where lower(btrim(sp.upi_transaction_ref)) = lower(btrim(p_upi_transaction_ref))) then
+    where lower(btrim(sp.upi_transaction_ref)) = lower(btrim(p_upi_transaction_ref)))
+     or exists (select 1 from public.payments pay
+    where lower(btrim(pay.upi_transaction_ref)) = lower(btrim(p_upi_transaction_ref))) then
     raise exception 'This UPI transaction reference has already been submitted';
   end if;
 
@@ -164,6 +166,9 @@ begin
   ) or exists (
     select 1 from public.booking_payments bp
     where lower(btrim(bp.upi_transaction_ref)) = lower(btrim(p_upi_transaction_ref))
+  ) or exists (
+    select 1 from public.payments pay
+    where lower(btrim(pay.upi_transaction_ref)) = lower(btrim(p_upi_transaction_ref))
   ) then
     raise exception 'This UPI transaction reference has already been submitted.';
   end if;
