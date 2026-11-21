@@ -2,6 +2,9 @@ import { useCallback, useEffect, useState } from 'react';
 import { isSupabaseConfigured, supabase } from './lib/supabase';
 
 type AdminProfile = { role: string };
+type WalkerAdmin = { id: string; service_areas: string[]; experience_years: number; verification_status: string; profile: { full_name: string | null; phone: string | null } | null };
+type AssignmentBooking = { id: string; scheduled_at: string; duration_minutes: number; service_address: string; status: string; walker_id: string | null; dog: { name: string } | null; customer: { full_name: string | null; phone: string | null } | null };
+type PricingRow = { id: string; duration_minutes: number; price_inr: number; is_active: boolean };
 type Booking = {
   id: string;
   scheduled_at: string;
@@ -76,6 +79,13 @@ export default function App() {
   const [ledgerDescription, setLedgerDescription] = useState('');
   const [creditBusy, setCreditBusy] = useState(false);
   const [creditMessage, setCreditMessage] = useState('');
+  const [walkersAdmin, setWalkersAdmin] = useState<WalkerAdmin[]>([]);
+  const [assignmentBookings, setAssignmentBookings] = useState<AssignmentBooking[]>([]);
+  const [pricingRows, setPricingRows] = useState<PricingRow[]>([]);
+  const [walkerSelections, setWalkerSelections] = useState<Record<string, string>>({});
+  const [pricingInputs, setPricingInputs] = useState<Record<string, string>>({});
+  const [operationsBusy, setOperationsBusy] = useState(false);
+  const [operationsMessage, setOperationsMessage] = useState('');
 
   async function verifyAdmin(userId: string, userEmail?: string) {
     if (!supabase) return;
@@ -199,6 +209,82 @@ export default function App() {
     if (!isAdmin || !supabase) return;
     void loadCreditCustomers();
   }, [isAdmin, loadCreditCustomers]);
+
+  const loadOperations = useCallback(async () => {
+    if (!supabase) return;
+    setOperationsBusy(true);
+    const [walkerResult, bookingResult, pricingResult] = await Promise.all([
+      supabase.from('walkers')
+        .select('id,service_areas,experience_years,verification_status,profile:profiles!walkers_id_fkey(full_name,phone)')
+        .order('created_at', { ascending: false }),
+      supabase.from('bookings')
+        .select('id,scheduled_at,duration_minutes,service_address,status,walker_id,dog:dogs(name),customer:profiles!bookings_customer_id_fkey(full_name,phone)')
+        .in('status', ['requested', 'assigned']).order('scheduled_at', { ascending: true }).limit(100),
+      supabase.from('pricing').select('id,duration_minutes,price_inr,is_active').order('duration_minutes'),
+    ]);
+    const failed = walkerResult.error || bookingResult.error || pricingResult.error;
+    if (failed) setOperationsMessage('Management data load नहीं हुआ: ' + failed.message);
+    else {
+      setWalkersAdmin((walkerResult.data ?? []) as unknown as WalkerAdmin[]);
+      setAssignmentBookings((bookingResult.data ?? []) as unknown as AssignmentBooking[]);
+      const rows = (pricingResult.data ?? []) as PricingRow[];
+      setPricingRows(rows);
+      setPricingInputs(Object.fromEntries(rows.map((row) => [row.id, String(row.price_inr)])));
+      setOperationsMessage('');
+    }
+    setOperationsBusy(false);
+  }, []);
+
+  useEffect(() => {
+    if (isAdmin) void loadOperations();
+  }, [isAdmin, loadOperations]);
+
+  async function reviewWalker(walkerId: string, decision: 'approved' | 'rejected') {
+    if (!supabase) return;
+    const note = decision === 'rejected' ? window.prompt('Walker reject करने का कारण लिखें:') : null;
+    if (decision === 'rejected' && (!note || note.trim().length < 3)) return;
+    setOperationsBusy(true); setOperationsMessage('');
+    const { error: updateError } = await supabase.from('walkers')
+      .update({ verification_status: decision, approved_at: decision === 'approved' ? new Date().toISOString() : null })
+      .eq('id', walkerId);
+    if (updateError) setOperationsMessage('Walker status update नहीं हुआ: ' + updateError.message);
+    else setOperationsMessage(decision === 'approved' ? 'Walker approve हो गया।' : 'Walker reject हो गया: ' + note);
+    await loadOperations();
+    setOperationsBusy(false);
+  }
+
+  async function assignBooking(bookingId: string) {
+    if (!supabase) return;
+    const walkerId = walkerSelections[bookingId];
+    if (!walkerId) { setOperationsMessage('पहले approved walker चुनें।'); return; }
+    setOperationsBusy(true); setOperationsMessage('');
+    const { data, error: updateError } = await supabase.from('bookings')
+      .update({ walker_id: walkerId, status: 'assigned' })
+      .eq('id', bookingId).eq('status', 'requested')
+      .select('id').maybeSingle();
+    if (updateError) setOperationsMessage('Walk assign नहीं हुई: ' + updateError.message);
+    else if (!data) setOperationsMessage('यह booking अब requested नहीं है। Refresh करके दोबारा देखें।');
+    else setOperationsMessage('Walk selected walker को assign कर दी गई।');
+    await loadOperations();
+    setOperationsBusy(false);
+  }
+
+  async function savePricing(row: PricingRow) {
+    if (!supabase) return;
+    const amount = Number(pricingInputs[row.id]);
+    if (!Number.isSafeInteger(amount) || amount <= 0) {
+      setOperationsMessage(row.duration_minutes + ' मिनट की walk के लिए ₹1 या उससे अधिक सही price डालें।');
+      return;
+    }
+    setOperationsBusy(true); setOperationsMessage('');
+    const { error: updateError } = await supabase.from('pricing')
+      .update({ price_inr: amount, is_active: true, updated_at: new Date().toISOString() })
+      .eq('id', row.id);
+    if (updateError) setOperationsMessage('Pricing save नहीं हुई: ' + updateError.message);
+    else setOperationsMessage(row.duration_minutes + ' मिनट की walk की pricing save हो गई।');
+    await loadOperations();
+    setOperationsBusy(false);
+  }
 
   useEffect(() => {
     if (!isAdmin || !supabase || !selectedCreditCustomer) { setCreditEntries([]); return; }
@@ -355,7 +441,7 @@ export default function App() {
       <aside className="sidebar">
         <div className="brand"><span className="brand-mark">DW</span><span>DOJO WALK</span></div>
         <p className="side-label">WORKSPACE</p>
-        <nav><a className="active" href="#overview">Overview</a><a href="#walks">Walks</a><a href="#payments">Payments</a><a href="#pay-later-requests">Pay Later approvals</a><a href="#dogs">Dogs & customers</a><a href="#walkers">Walkers</a><a href="#payouts">Walker payouts</a><a href="#trusted-customers">Trusted customers</a></nav>
+        <nav><a className="active" href="#overview">Overview</a><a href="#walks">Walks</a><a href="#payments">Payments</a><a href="#pay-later-requests">Pay Later approvals</a><a href="#dogs">Dogs & customers</a><a href="#walkers">Walkers</a><a href="#assignments">Walk assignment</a><a href="#pricing">Pricing</a><a href="#payouts">Walker payouts</a><a href="#trusted-customers">Trusted customers</a></nav>
         <div className="sidebar-foot">WALK. CARE. TRUST.</div>
       </aside>
       <section className="content" id="overview">
@@ -404,6 +490,20 @@ export default function App() {
             <p className="notice inline-notice">हर UTR को अपने PhonePe / bank statement में मिलाने के बाद ही Verify करें। Verify करने पर subscription आज से active होगा। Reject करने पर pending subscription cancel होगा।</p>
           </article>
         </section>
+        <section className="panel route-panel" id="walkers">
+          <div className="panel-heading"><div><h3>Walker management</h3><p>New walker accounts stay pending until Admin approval.</p></div><button className="refresh" onClick={() => void loadOperations()} disabled={operationsBusy}>Refresh</button></div>
+          {walkersAdmin.length === 0 ? <p className="empty">अभी कोई walker account नहीं है।</p> : <div className="table-wrap"><table><thead><tr><th>Walker</th><th>Phone</th><th>Experience</th><th>Status</th><th>Action</th></tr></thead><tbody>{walkersAdmin.map((walker) => <tr key={walker.id}><td>{walker.profile?.full_name || walker.id.slice(0, 8)}</td><td>{walker.profile?.phone || '—'}</td><td>{walker.experience_years} years</td><td><span className={'pill ' + walker.verification_status}>{walker.verification_status}</span></td><td>{walker.verification_status === 'pending' ? <div className="payment-actions"><button className="refresh approve" disabled={operationsBusy} onClick={() => void reviewWalker(walker.id, 'approved')}>Approve</button><button className="refresh reject" disabled={operationsBusy} onClick={() => void reviewWalker(walker.id, 'rejected')}>Reject</button></div> : walker.verification_status === 'approved' ? <span className="subtle-count">Eligible for assignment</span> : '—'}</td></tr>)}</tbody></table></div>}
+        </section>
+        <section className="panel route-panel" id="assignments">
+          <div className="panel-heading"><div><h3>Walk assignment</h3><p>Assign each requested walk to one approved walker.</p></div></div>
+          {assignmentBookings.filter((booking) => booking.status === 'requested').length === 0 ? <p className="empty">कोई unassigned walk request नहीं है।</p> : <div className="payment-list">{assignmentBookings.filter((booking) => booking.status === 'requested').map((booking) => <div className="payment-row payment-review-row" key={booking.id}><div><strong>{booking.dog?.name || 'Dog'} · {booking.duration_minutes} min</strong><small>{booking.customer?.full_name || 'Customer'} {booking.customer?.phone ? '· ' + booking.customer.phone : ''}</small><small>{dateTime(booking.scheduled_at)} · {booking.service_address}</small><div className="payment-actions"><select value={walkerSelections[booking.id] || ''} onChange={(event) => setWalkerSelections((current) => ({ ...current, [booking.id]: event.target.value }))}><option value="">Approved walker चुनें</option>{walkersAdmin.filter((walker) => walker.verification_status === 'approved').map((walker) => <option key={walker.id} value={walker.id}>{walker.profile?.full_name || walker.profile?.phone || walker.id.slice(0, 8)}</option>)}</select><button className="refresh approve" disabled={operationsBusy} onClick={() => void assignBooking(booking.id)}>Assign walk</button></div></div><span className="pill pending">Requested</span></div>)}</div>}
+          {assignmentBookings.some((booking) => booking.status === 'assigned') ? <p className="notice inline-notice">{assignmentBookings.filter((booking) => booking.status === 'assigned').length} walk(s) already assigned. Walker sees only their own assigned walks.</p> : null}
+        </section>
+        <section className="panel route-panel" id="pricing">
+          <div className="panel-heading"><div><h3>Walk pricing</h3><p>Admin sets the public per-walk price for 30, 45 and 60 minute services.</p></div></div>
+          <div className="credit-grid">{pricingRows.map((row) => <div className="credit-form" key={row.id}><h4>{row.duration_minutes} minute walk</h4><label>Price in INR<input type="number" min="1" step="1" value={pricingInputs[row.id] ?? ''} onChange={(event) => setPricingInputs((current) => ({ ...current, [row.id]: event.target.value }))} /></label><small>{row.price_inr > 0 && row.is_active ? 'Active price' : 'Not available to customers until a valid price is saved'}</small><button className="refresh" disabled={operationsBusy} onClick={() => void savePricing(row)}>Save {row.duration_minutes} min price</button></div>)}</div>
+        </section>
+        {operationsMessage && <p className="notice">{operationsMessage}</p>}
         <section className="panel route-panel" id="trusted-customers">
           <div className="panel-heading"><div><h3>Trusted customers · Pay Later</h3><p>भरोसेमंद ग्राहक को अनुमति दें, बकाया जोड़ें और payment मिलने पर receipt दर्ज करें।</p></div></div>
           <div className="credit-grid">
