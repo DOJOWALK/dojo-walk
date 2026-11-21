@@ -169,8 +169,11 @@ export default function App() {
         return;
       }
 
-      const backgroundPermission = await Location.requestBackgroundPermissionsAsync();
-      if (backgroundPermission.granted && await TaskManager.isAvailableAsync()) {
+      const backgroundAvailable = await TaskManager.isAvailableAsync();
+      const backgroundPermission = backgroundAvailable
+        ? await Location.requestBackgroundPermissionsAsync()
+        : { granted: false };
+      if (backgroundAvailable && backgroundPermission.granted) {
         globalThis.localStorage?.setItem('dojo_active_booking_id', bookingId);
         await Location.startLocationUpdatesAsync(WALK_LOCATION_TASK, {
           accuracy: Location.Accuracy.Balanced,
@@ -202,7 +205,9 @@ export default function App() {
             else setGpsMessage('Foreground GPS route record हो रहा है।');
           }
         );
-        setGpsMessage('Background permission उपलब्ध नहीं है। GPS केवल app खुला रहने पर record होगा।');
+        setGpsMessage(backgroundAvailable
+          ? 'Background permission उपलब्ध नहीं है। GPS केवल app खुला रहने पर record होगा।'
+          : 'इस preview environment में background tracking उपलब्ध नहीं है। GPS केवल app खुला रहने पर record होगा।');
       }
     } catch (e) {
       setError('Walk शुरू नहीं हुई: ' + (e instanceof Error ? e.message : 'Unknown error'));
