@@ -366,7 +366,7 @@ export default function App() {
     if (!supabase) return;
     let proposedAt: string | null = null;
     if (changeSchedule.trim()) {
-      const match = /^(\\d{4})-(\\d{2})-(\\d{2})\\s+(\\d{2}):(\\d{2})$/.exec(changeSchedule.trim());
+      const match = /^(\d{4})-(\d{2})-(\d{2})\s+(\d{2}):(\d{2})$/.exec(changeSchedule.trim());
       if (!match) { setError('New date/time YYYY-MM-DD HH:MM format में डालें।'); return; }
       const [, y, m, d, h, min] = match;
       const dt = new Date(Number(y), Number(m)-1, Number(d), Number(h), Number(min));
@@ -382,7 +382,7 @@ export default function App() {
       p_proposed_latitude: bookingLatitude,
       p_proposed_longitude: bookingLongitude,
       p_customer_note: changeNote.trim() || null,
-      p_proposed_service_slot: changeSlot,
+      p_proposed_service_slot: customerWalks.find((walk) => walk.id === bookingId)?.service_slot === changeSlot ? null : changeSlot,
     });
     if (requestError) setError('Change request submit नहीं हुई: ' + requestError.message);
     else {
@@ -442,6 +442,7 @@ export default function App() {
   async function addDog() {
     if (!supabase || !userId) return;
     if (!dogName.trim()) { setError('कुत्ते का नाम डालें।'); return; }
+    if (!dogServiceAddress.trim()) { setError('Dog का पूरा service address डालें।'); return; }
     const age = dogAge.trim() ? Number(dogAge) : null;
     if (age !== null && (!Number.isFinite(age) || age < 0 || age > 30)) { setError('कृपया सही उम्र डालें।'); return; }
     setBusy(true); setError(''); setMessage('');
