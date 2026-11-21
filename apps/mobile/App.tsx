@@ -292,7 +292,7 @@ export default function App() {
       setError('पहले dog चुनें।');
       return;
     }
-    const match = /^(\\d{4})-(\\d{2})-(\\d{2})\\s+(\\d{2}):(\\d{2})$/.exec(bookingSchedule.trim());
+    const match = /^(\d{4})-(\d{2})-(\d{2})\s+(\d{2}):(\d{2})$/.exec(bookingSchedule.trim());
     if (!match) {
       setError('Date और time इस format में डालें: YYYY-MM-DD HH:MM (24-hour)');
       return;
