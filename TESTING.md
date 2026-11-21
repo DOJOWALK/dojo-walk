@@ -36,8 +36,9 @@ npm run preview --workspace @dojowalk/admin
 From the repository root:
 
 ```bash
-npx expo install --check --project-dir apps/mobile
-npx expo-doctor --project-dir apps/mobile
+cd apps/mobile
+npx expo install --check
+npx expo-doctor
 ```
 
 If Expo reports a package version mismatch, use the Expo-recommended version rather than forcing an arbitrary version.
