@@ -162,12 +162,23 @@ export default function App() {
 
   const loadCreditCustomers = useCallback(async () => {
     if (!supabase) return;
-    const { data, error: loadError } = await supabase
-      .from('customer_credit_accounts')
-      .select('customer_id,is_trusted,credit_limit_inr,custom_monthly_price_inr,admin_note,profile:profiles(full_name,phone)')
-      .order('updated_at', { ascending: false });
-    if (loadError) { setDashboardError('Trusted customer data load नहीं हुआ: ' + loadError.message); return; }
-    const rows = (data ?? []) as unknown as CustomerCredit[];
+    const [{ data: profiles, error: profileError }, { data: accounts, error: accountError }] = await Promise.all([
+      supabase.from('profiles').select('id,full_name,phone').eq('role', 'customer').order('full_name'),
+      supabase.from('customer_credit_accounts').select('customer_id,is_trusted,credit_limit_inr,custom_monthly_price_inr,admin_note'),
+    ]);
+    if (profileError || accountError) {
+      setDashboardError('Customer credit data load नहीं हुआ: ' + (profileError || accountError)?.message);
+      return;
+    }
+    const accountMap = new Map((accounts ?? []).map((account) => [account.customer_id, account]));
+    const rows = (profiles ?? []).map((profile) => ({
+      customer_id: profile.id,
+      is_trusted: accountMap.get(profile.id)?.is_trusted ?? false,
+      credit_limit_inr: accountMap.get(profile.id)?.credit_limit_inr ?? 0,
+      custom_monthly_price_inr: accountMap.get(profile.id)?.custom_monthly_price_inr ?? null,
+      admin_note: accountMap.get(profile.id)?.admin_note ?? null,
+      profile: { full_name: profile.full_name, phone: profile.phone },
+    })) as CustomerCredit[];
     setCreditCustomers(rows);
     if (!selectedCreditCustomer && rows.length) setSelectedCreditCustomer(rows[0].customer_id);
   }, [selectedCreditCustomer]);
