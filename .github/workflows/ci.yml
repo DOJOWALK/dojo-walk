@@ -1,0 +1,34 @@
+name: DOJO WALK CI
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main, feature/customer-upi-package-request]
+
+jobs:
+  admin-build:
+    name: Admin TypeScript and production build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm install
+      - run: npm run build:admin
+
+  mobile-export:
+    name: Android JavaScript bundle export
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm install
+      - name: Export Android bundle
+        working-directory: apps/mobile
+        run: npx expo export --platform android --output-dir dist
