@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { StatusBar } from 'expo-status-bar';
 import * as Location from 'expo-location';
+import * as TaskManager from 'expo-task-manager';
 import {
   ActivityIndicator, KeyboardAvoidingView, Platform, Pressable,
   ScrollView, StyleSheet, Text, TextInput, View,
@@ -12,6 +13,28 @@ type Dog = { id: string; name: string; breed: string | null; age_years: number |
 type Package = { id: string; walks_per_day: number; duration_minutes: number; monthly_price_inr: number };
 type Subscription = { id: string; dog_id: string; walks_per_day: number; duration_minutes: number; monthly_price_inr: number; starts_on: string; ends_on: string; status: string };
 type AssignedWalk = { id: string; scheduled_at: string; duration_minutes: number; service_address: string; customer_notes: string | null; status: string; actual_started_at: string | null; actual_ended_at: string | null; actual_duration_minutes: number | null; walk_report: string | null; dog: { name: string; breed: string | null } | null };
+
+const WALK_LOCATION_TASK = 'dojo-walk-active-route';
+
+TaskManager.defineTask(WALK_LOCATION_TASK, async ({ data, error }) => {
+  if (error || !supabase) return;
+  const bookingId = globalThis.localStorage?.getItem('dojo_active_booking_id');
+  if (!bookingId) return;
+  const { data: sessionData } = await supabase.auth.getSession();
+  const walkerId = sessionData.session?.user.id;
+  if (!walkerId) return;
+  const locations = (data as { locations?: Location.LocationObject[] } | undefined)?.locations ?? [];
+  if (!locations.length) return;
+  await supabase.from('walker_locations').insert(
+    locations.map((point) => ({
+      booking_id: bookingId,
+      walker_id: walkerId,
+      latitude: point.coords.latitude,
+      longitude: point.coords.longitude,
+      recorded_at: new Date(point.timestamp).toISOString(),
+    }))
+  );
+});
 
 function normalizeIndianPhone(value: string) {
   const digits = value.replace(/\D/g, '');
@@ -146,22 +169,41 @@ export default function App() {
         return;
       }
 
-      locationSubscription.current?.remove();
-      locationSubscription.current = await Location.watchPositionAsync(
-        { accuracy: Location.Accuracy.Balanced, timeInterval: 5000, distanceInterval: 10 },
-        async (position) => {
-          if (!supabase) return;
-          const { error: locationError } = await supabase.from('walker_locations').insert({
-            booking_id: bookingId,
-            walker_id: userId,
-            latitude: position.coords.latitude,
-            longitude: position.coords.longitude,
-            recorded_at: new Date(position.timestamp).toISOString(),
-          });
-          if (locationError) setGpsMessage('GPS point save नहीं हुआ: ' + locationError.message);
-          else setGpsMessage('GPS route record हो रहा है।');
-        }
-      );
+      const backgroundPermission = await Location.requestBackgroundPermissionsAsync();
+      if (backgroundPermission.granted && await TaskManager.isAvailableAsync()) {
+        globalThis.localStorage?.setItem('dojo_active_booking_id', bookingId);
+        await Location.startLocationUpdatesAsync(WALK_LOCATION_TASK, {
+          accuracy: Location.Accuracy.Balanced,
+          timeInterval: 5000,
+          distanceInterval: 10,
+          pausesUpdatesAutomatically: false,
+          showsBackgroundLocationIndicator: true,
+          foregroundService: {
+            notificationTitle: 'DOJO WALK · Walk in progress',
+            notificationBody: 'Your walk route is being shared with the customer and Admin.',
+            killServiceOnDestroy: false,
+          },
+        });
+        setGpsMessage('Background और foreground GPS route record हो रहा है।');
+      } else {
+        locationSubscription.current?.remove();
+        locationSubscription.current = await Location.watchPositionAsync(
+          { accuracy: Location.Accuracy.Balanced, timeInterval: 5000, distanceInterval: 10 },
+          async (position) => {
+            if (!supabase) return;
+            const { error: locationError } = await supabase.from('walker_locations').insert({
+              booking_id: bookingId,
+              walker_id: userId,
+              latitude: position.coords.latitude,
+              longitude: position.coords.longitude,
+              recorded_at: new Date(position.timestamp).toISOString(),
+            });
+            if (locationError) setGpsMessage('GPS point save नहीं हुआ: ' + locationError.message);
+            else setGpsMessage('Foreground GPS route record हो रहा है।');
+          }
+        );
+        setGpsMessage('Background permission उपलब्ध नहीं है। GPS केवल app खुला रहने पर record होगा।');
+      }
     } catch (e) {
       setError('Walk शुरू नहीं हुई: ' + (e instanceof Error ? e.message : 'Unknown error'));
     }
@@ -180,6 +222,10 @@ export default function App() {
     } else {
       locationSubscription.current?.remove();
       locationSubscription.current = null;
+      if (await TaskManager.isTaskRegisteredAsync(WALK_LOCATION_TASK)) {
+        await Location.stopLocationUpdatesAsync(WALK_LOCATION_TASK);
+      }
+      globalThis.localStorage?.removeItem('dojo_active_booking_id');
       setWalkReport('');
       setGpsMessage('');
       setMessage('Walk successfully complete हो गई।');
@@ -297,7 +343,7 @@ export default function App() {
                 </View>
               </View>)}
               {gpsMessage ? <Text style={styles.success}>{gpsMessage}</Text> : null}
-              <View style={styles.notice}><Text style={styles.noticeTitle}>GPS tracking</Text><Text style={styles.noticeBody}>Walk active रहने पर app खुला होने के दौरान GPS points हर कुछ seconds में save होते हैं। App बंद/background होने पर tracking अभी guaranteed नहीं है; उसके लिए अगला native background-location build और device testing जरूरी है।</Text></View>
+              <View style={styles.notice}><Text style={styles.noticeTitle}>GPS tracking</Text><Text style={styles.noticeBody}>Walk active रहने पर GPS points save होते हैं। Background GPS के लिए location permission और native development build जरूरी है; Expo Go में background tracking उपलब्ध नहीं होती।</Text></View>
             </> : <View style={styles.card}>
               <Text style={styles.cardEyebrow}>{roleText.toUpperCase()}</Text>
               <Text style={styles.welcome}>Admin account connected</Text>
