@@ -1,5 +1,6 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { StatusBar } from 'expo-status-bar';
+import * as Location from 'expo-location';
 import {
   ActivityIndicator, KeyboardAvoidingView, Platform, Pressable,
   ScrollView, StyleSheet, Text, TextInput, View,
@@ -10,7 +11,7 @@ type Profile = { role: 'customer' | 'walker' | 'admin'; full_name: string | null
 type Dog = { id: string; name: string; breed: string | null; age_years: number | null; notes: string | null };
 type Package = { id: string; walks_per_day: number; duration_minutes: number; monthly_price_inr: number };
 type Subscription = { id: string; dog_id: string; walks_per_day: number; duration_minutes: number; monthly_price_inr: number; starts_on: string; ends_on: string; status: string };
-type AssignedWalk = { id: string; scheduled_at: string; duration_minutes: number; service_address: string; customer_notes: string | null; status: string; dog: { name: string; breed: string | null } | null };
+type AssignedWalk = { id: string; scheduled_at: string; duration_minutes: number; service_address: string; customer_notes: string | null; status: string; actual_started_at: string | null; actual_ended_at: string | null; actual_duration_minutes: number | null; walk_report: string | null; dog: { name: string; breed: string | null } | null };
 
 function normalizeIndianPhone(value: string) {
   const digits = value.replace(/\D/g, '');
@@ -40,6 +41,9 @@ export default function App() {
   const [dogBreed, setDogBreed] = useState('');
   const [dogAge, setDogAge] = useState('');
   const [dogNotes, setDogNotes] = useState('');
+  const [walkReport, setWalkReport] = useState('');
+  const [gpsMessage, setGpsMessage] = useState('');
+  const locationSubscription = useRef<Location.LocationSubscription | null>(null);
 
   async function loadProfile(id: string) {
     if (!supabase) return;
@@ -78,7 +82,7 @@ export default function App() {
     if (!supabase || !userId || profile?.role !== 'walker') return;
     setLoadingData(true); setError('');
     const { data, error: queryError } = await supabase.from('bookings')
-      .select('id, scheduled_at, duration_minutes, service_address, customer_notes, status, dog:dogs(name, breed)')
+      .select('id, scheduled_at, duration_minutes, service_address, customer_notes, status, actual_started_at, actual_ended_at, actual_duration_minutes, walk_report, dog:dogs(name, breed)')
       .eq('walker_id', userId).order('scheduled_at', { ascending: true }).limit(50);
     if (queryError) setError('Assigned walks load नहीं हुए: ' + queryError.message);
     else setAssignedWalks((data ?? []) as unknown as AssignedWalk[]);
@@ -125,6 +129,65 @@ export default function App() {
     setBusy(false);
   }
 
+  async function startWalk(bookingId: string) {
+    if (!supabase || !userId) return;
+    setBusy(true); setError(''); setMessage(''); setGpsMessage('');
+    try {
+      const permission = await Location.requestForegroundPermissionsAsync();
+      const { error: startError } = await supabase.rpc('walker_start_booking', { p_booking_id: bookingId });
+      if (startError) throw startError;
+
+      setMessage('Walk शुरू हो गई।');
+      await loadWalkerData();
+
+      if (!permission.granted) {
+        setGpsMessage('Location permission नहीं मिली। Walk शुरू है, लेकिन GPS route record नहीं होगा। Settings में location permission चालू करें।');
+        setBusy(false);
+        return;
+      }
+
+      locationSubscription.current?.remove();
+      locationSubscription.current = await Location.watchPositionAsync(
+        { accuracy: Location.Accuracy.Balanced, timeInterval: 5000, distanceInterval: 10 },
+        async (position) => {
+          if (!supabase) return;
+          const { error: locationError } = await supabase.from('walker_locations').insert({
+            booking_id: bookingId,
+            walker_id: userId,
+            latitude: position.coords.latitude,
+            longitude: position.coords.longitude,
+            recorded_at: new Date(position.timestamp).toISOString(),
+          });
+          if (locationError) setGpsMessage('GPS point save नहीं हुआ: ' + locationError.message);
+          else setGpsMessage('GPS route record हो रहा है।');
+        }
+      );
+    } catch (e) {
+      setError('Walk शुरू नहीं हुई: ' + (e instanceof Error ? e.message : 'Unknown error'));
+    }
+    setBusy(false);
+  }
+
+  async function finishWalk(bookingId: string) {
+    if (!supabase) return;
+    setBusy(true); setError(''); setMessage('');
+    const { error: finishError } = await supabase.rpc('walker_finish_booking', {
+      p_booking_id: bookingId,
+      p_walk_report: walkReport.trim() || null,
+    });
+    if (finishError) {
+      setError('Walk finish नहीं हुई: ' + finishError.message);
+    } else {
+      locationSubscription.current?.remove();
+      locationSubscription.current = null;
+      setWalkReport('');
+      setGpsMessage('');
+      setMessage('Walk successfully complete हो गई।');
+      await loadWalkerData();
+    }
+    setBusy(false);
+  }
+
   async function addDog() {
     if (!supabase || !userId) return;
     if (!dogName.trim()) { setError('कुत्ते का नाम डालें।'); return; }
@@ -150,6 +213,8 @@ export default function App() {
     setProfile(null); setUserId(''); setDogs([]); setSubscriptions([]);
     setMessage('आप सुरक्षित रूप से sign out हो गए हैं।');
   }
+
+  useEffect(() => () => { locationSubscription.current?.remove(); }, []);
 
   const roleText = profile?.role === 'walker' ? 'Walker account' : profile?.role === 'admin' ? 'Admin account' : 'Customer account';
 
@@ -217,9 +282,22 @@ export default function App() {
               <View style={styles.sectionHeader}><View><Text style={styles.sectionTitle}>मेरी Assigned Walks</Text><Text style={styles.sectionHint}>सिर्फ आपको assign की गई walks दिखाई जाती हैं।</Text></View><Pressable style={styles.smallPrimary} onPress={() => void loadWalkerData()}><Text style={styles.smallPrimaryText}>Refresh</Text></Pressable></View>
               {loadingData ? <ActivityIndicator color="#F07824" style={{ margin: 20 }} /> : assignedWalks.length === 0 ? <View style={styles.empty}><Text style={styles.emptyTitle}>अभी कोई walk assign नहीं हुई</Text><Text style={styles.body}>Admin द्वारा आपको dog और walk assign करने पर वह यहाँ दिखाई देगी।</Text></View> : assignedWalks.map((walk) => <View style={styles.dogCard} key={walk.id}>
                 <View style={styles.dogAvatar}><Text style={styles.dogAvatarText}>{(walk.dog?.name || 'D').slice(0, 1).toUpperCase()}</Text></View>
-                <View style={{ flex: 1 }}><Text style={styles.dogName}>{walk.dog?.name || 'Assigned dog'}</Text><Text style={styles.dogMeta}>{walk.dog?.breed || 'Breed not listed'} · {walk.duration_minutes} minutes</Text><Text style={styles.dogMeta}>{new Date(walk.scheduled_at).toLocaleString('en-IN', { dateStyle: 'medium', timeStyle: 'short' })}</Text><Text style={styles.dogStatus}>{walk.status.replace('_', ' ')}</Text><Text style={styles.dogMeta}>{walk.service_address}</Text>{walk.customer_notes ? <Text style={styles.dogMeta}>Note: {walk.customer_notes}</Text> : null}</View>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.dogName}>{walk.dog?.name || 'Assigned dog'}</Text>
+                  <Text style={styles.dogMeta}>{walk.dog?.breed || 'Breed not listed'} · {walk.duration_minutes} minutes</Text>
+                  <Text style={styles.dogMeta}>{new Date(walk.scheduled_at).toLocaleString('en-IN', { dateStyle: 'medium', timeStyle: 'short' })}</Text>
+                  <Text style={styles.dogStatus}>{walk.status.replace('_', ' ')}</Text>
+                  <Text style={styles.dogMeta}>{walk.service_address}</Text>
+                  {walk.customer_notes ? <Text style={styles.dogMeta}>Note: {walk.customer_notes}</Text> : null}
+                  {walk.actual_started_at ? <Text style={styles.dogMeta}>Started: {new Date(walk.actual_started_at).toLocaleTimeString('en-IN')}</Text> : null}
+                  {walk.status === 'in_progress' ? <>
+                    <TextInput value={walkReport} onChangeText={setWalkReport} placeholder="Walk report (optional)" multiline style={[styles.input, styles.multiline, { marginTop: 10 }]} maxLength={2000} />
+                    <Pressable style={[styles.primaryButton, busy && styles.disabled]} onPress={() => void finishWalk(walk.id)} disabled={busy}><Text style={styles.primaryText}>{busy ? 'Please wait…' : 'Stop Walk & Submit Report'}</Text></Pressable>
+                  </> : walk.status === 'assigned' || walk.status === 'accepted' ? <Pressable style={[styles.primaryButton, busy && styles.disabled]} onPress={() => void startWalk(walk.id)} disabled={busy}><Text style={styles.primaryText}>{busy ? 'Please wait…' : 'Start Walk'}</Text></Pressable> : walk.status === 'completed' ? <Text style={styles.dogMeta}>Completed · {walk.actual_duration_minutes ?? '—'} minutes recorded</Text> : null}
+                </View>
               </View>)}
-              <View style={styles.notice}><Text style={styles.noticeTitle}>Walk controls coming next</Text><Text style={styles.noticeBody}>Start/Stop Walk, live GPS और walk report अगली सुरक्षित development stage में जोड़े जाएँगे। अभी यह assigned walk list केवल देखने के लिए है।</Text></View>
+              {gpsMessage ? <Text style={styles.success}>{gpsMessage}</Text> : null}
+              <View style={styles.notice}><Text style={styles.noticeTitle}>GPS tracking</Text><Text style={styles.noticeBody}>Walk active रहने पर app खुला होने के दौरान GPS points हर कुछ seconds में save होते हैं। App बंद/background होने पर tracking अभी guaranteed नहीं है; उसके लिए अगला native background-location build और device testing जरूरी है।</Text></View>
             </> : <View style={styles.card}>
               <Text style={styles.cardEyebrow}>{roleText.toUpperCase()}</Text>
               <Text style={styles.welcome}>Admin account connected</Text>
