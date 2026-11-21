@@ -3,9 +3,9 @@ import { isSupabaseConfigured, supabase } from './lib/supabase';
 
 type AdminProfile = { role: string };
 type WalkerAdmin = { id: string; service_areas: string[]; experience_years: number; verification_status: string; profile: { full_name: string | null; phone: string | null } | null };
-type AssignmentBooking = { id: string; scheduled_at: string; duration_minutes: number; service_address: string; status: string; walker_id: string | null; dog: { name: string } | null; customer: { full_name: string | null; phone: string | null } | null };
+type AssignmentBooking = { id: string; scheduled_at: string; duration_minutes: number; service_address: string; service_slot: string | null; service_latitude: number | null; service_longitude: number | null; status: string; walker_id: string | null; dog: { name: string } | null; customer: { full_name: string | null; phone: string | null } | null };
 type PricingRow = { id: string; duration_minutes: number; price_inr: number; is_active: boolean };
-type AdminCustomer = { id: string; full_name: string | null; phone: string | null; dogs: { id: string; name: string; breed: string | null; age_years: number | null }[] };
+type AdminCustomer = { id: string; full_name: string | null; phone: string | null; dogs: { id: string; name: string; breed: string | null; age_years: number | null; service_address: string | null; service_latitude: number | null; service_longitude: number | null }[] };
 type WalkerPayout = { id: string; walker_id: string; payout_month: string; gross_amount_inr: number; paid_amount_inr: number; status: string; walker: { profile: { full_name: string | null; phone: string | null } | null } | null };
 type Booking = {
   id: string;
@@ -224,14 +224,14 @@ export default function App() {
         .select('id,service_areas,experience_years,verification_status,profile:profiles!walkers_id_fkey(full_name,phone)')
         .order('created_at', { ascending: false }),
       supabase.from('bookings')
-        .select('id,scheduled_at,duration_minutes,service_address,status,walker_id,dog:dogs(name),customer:profiles!bookings_customer_id_fkey(full_name,phone)')
+        .select('id,scheduled_at,duration_minutes,service_address,service_slot,service_latitude,service_longitude,status,walker_id,dog:dogs(name),customer:profiles!bookings_customer_id_fkey(full_name,phone)')
         .in('status', ['requested', 'assigned']).order('scheduled_at', { ascending: true }).limit(100),
       supabase.from('pricing').select('id,duration_minutes,price_inr,is_active').order('duration_minutes'),
       supabase.from('walker_payouts')
         .select('id,walker_id,payout_month,gross_amount_inr,paid_amount_inr,status,walker:walkers!walker_payouts_walker_id_fkey(profile:profiles!walkers_id_fkey(full_name,phone))')
         .order('payout_month', { ascending: false }).limit(100),
       supabase.from('profiles')
-        .select('id,full_name,phone,dogs:dogs!dogs_customer_id_fkey(id,name,breed,age_years)')
+        .select('id,full_name,phone,dogs:dogs!dogs_customer_id_fkey(id,name,breed,age_years,service_address,service_latitude,service_longitude)')
         .eq('role', 'customer').order('full_name'),
       supabase.from('booking_change_requests')
         .select('id,booking_id,customer_id,proposed_scheduled_at,proposed_service_address,proposed_latitude,proposed_longitude,proposed_service_slot,customer_note,status,admin_note,created_at,booking:bookings!booking_change_requests_booking_id_fkey(scheduled_at,service_address,service_slot,status,dog:dogs(name)),customer:profiles!booking_change_requests_customer_id_fkey(full_name,phone)')
@@ -498,7 +498,7 @@ export default function App() {
       <aside className="sidebar">
         <div className="brand"><span className="brand-mark">DW</span><span>DOJO WALK</span></div>
         <p className="side-label">WORKSPACE</p>
-        <nav><a className="active" href="#overview">Overview</a><a href="#walks">Walks</a><a href="#payments">Payments</a><a href="#pay-later-requests">Pay Later approvals</a><a href="#dogs">Dogs & customers</a><a href="#walkers">Walkers</a><a href="#assignments">Walk assignment</a><a href="#pricing">Pricing</a><a href="#payouts">Walker payouts</a><a href="#trusted-customers">Trusted customers</a></nav>
+        <nav><a className="active" href="#overview">Overview</a><a href="#walks">Walks</a><a href="#payments">Payments</a><a href="#pay-later-requests">Pay Later approvals</a><a href="#dogs">Dogs & customers</a><a href="#walkers">Walkers</a><a href="#change-requests">Change requests</a><a href="#assignments">Walk assignment</a><a href="#pricing">Pricing</a><a href="#payouts">Walker payouts</a><a href="#trusted-customers">Trusted customers</a></nav>
         <div className="sidebar-foot">WALK. CARE. TRUST.</div>
       </aside>
       <section className="content" id="overview">
@@ -549,7 +549,7 @@ export default function App() {
         </section>
         <section className="panel route-panel" id="dogs">
           <div className="panel-heading"><div><h3>Customers & dogs</h3><p>Every dog is listed separately and remains linked to its own customer account and package.</p></div><span className="subtle-count">{adminCustomers.length} customers</span></div>
-          {adminCustomers.length === 0 ? <p className="empty">अभी कोई customer account नहीं है।</p> : <div className="table-wrap"><table><thead><tr><th>Customer</th><th>Phone</th><th>Dogs</th></tr></thead><tbody>{adminCustomers.map((customer) => <tr key={customer.id}><td>{customer.full_name || customer.id.slice(0, 8)}</td><td>{customer.phone || '—'}</td><td>{customer.dogs.length ? customer.dogs.map((dog) => dog.name + (dog.breed ? ' · ' + dog.breed : '')).join(', ') : 'No dog added yet'}</td></tr>)}</tbody></table></div>}
+          {adminCustomers.length === 0 ? <p className="empty">अभी कोई customer account नहीं है।</p> : <div className="table-wrap"><table><thead><tr><th>Customer</th><th>Phone</th><th>Dogs & service location</th></tr></thead><tbody>{adminCustomers.map((customer) => <tr key={customer.id}><td>{customer.full_name || customer.id.slice(0, 8)}</td><td>{customer.phone || '—'}</td><td>{customer.dogs.length ? customer.dogs.map((dog) => dog.name + (dog.breed ? ' · ' + dog.breed : '') + (dog.service_address ? ' · ' + dog.service_address : ' · Address missing') + (dog.service_latitude !== null && dog.service_longitude !== null ? ' · Pin ' + dog.service_latitude.toFixed(4) + ', ' + dog.service_longitude.toFixed(4) : '')).join(' | ') : 'No dog added yet'}</td></tr>)}</tbody></table></div>}
         </section>
         <section className="panel route-panel" id="walkers">
           <div className="panel-heading"><div><h3>Walker management</h3><p>New walker accounts stay pending until Admin approval.</p></div><button className="refresh" onClick={() => void loadOperations()} disabled={operationsBusy}>Refresh</button></div>
@@ -561,7 +561,7 @@ export default function App() {
         </section>
         <section className="panel route-panel" id="assignments">
           <div className="panel-heading"><div><h3>Walk assignment</h3><p>Assign each requested walk to one approved walker.</p></div></div>
-          {assignmentBookings.filter((booking) => booking.status === 'requested').length === 0 ? <p className="empty">कोई unassigned walk request नहीं है।</p> : <div className="payment-list">{assignmentBookings.filter((booking) => booking.status === 'requested').map((booking) => <div className="payment-row payment-review-row" key={booking.id}><div><strong>{booking.dog?.name || 'Dog'} · {booking.duration_minutes} min</strong><small>{booking.customer?.full_name || 'Customer'} {booking.customer?.phone ? '· ' + booking.customer.phone : ''}</small><small>{dateTime(booking.scheduled_at)} · {booking.service_address}</small><div className="payment-actions"><select value={walkerSelections[booking.id] || ''} onChange={(event) => setWalkerSelections((current) => ({ ...current, [booking.id]: event.target.value }))}><option value="">Approved walker चुनें</option>{walkersAdmin.filter((walker) => walker.verification_status === 'approved').map((walker) => <option key={walker.id} value={walker.id}>{walker.profile?.full_name || walker.profile?.phone || walker.id.slice(0, 8)}</option>)}</select><button className="refresh approve" disabled={operationsBusy} onClick={() => void assignBooking(booking.id)}>Assign walk</button></div></div><span className="pill pending">Requested</span></div>)}</div>}
+          {assignmentBookings.filter((booking) => booking.status === 'requested').length === 0 ? <p className="empty">कोई unassigned walk request नहीं है।</p> : <div className="payment-list">{assignmentBookings.filter((booking) => booking.status === 'requested').map((booking) => <div className="payment-row payment-review-row" key={booking.id}><div><strong>{booking.dog?.name || 'Dog'} · {booking.duration_minutes} min</strong><small>{booking.customer?.full_name || 'Customer'} {booking.customer?.phone ? '· ' + booking.customer.phone : ''}</small><small>{dateTime(booking.scheduled_at)} · {booking.service_slot ? booking.service_slot.toUpperCase() + ' · ' : ''}{booking.service_address}</small>{booking.service_latitude !== null && booking.service_longitude !== null ? <small><a className="map-link" href={'https://www.openstreetmap.org/?mlat=' + booking.service_latitude + '&mlon=' + booking.service_longitude + '#map=17/' + booking.service_latitude + '/' + booking.service_longitude} target="_blank" rel="noreferrer">Open pickup pin ↗</a></small> : null}<div className="payment-actions"><select value={walkerSelections[booking.id] || ''} onChange={(event) => setWalkerSelections((current) => ({ ...current, [booking.id]: event.target.value }))}><option value="">Approved walker चुनें</option>{walkersAdmin.filter((walker) => walker.verification_status === 'approved').map((walker) => <option key={walker.id} value={walker.id}>{walker.profile?.full_name || walker.profile?.phone || walker.id.slice(0, 8)}</option>)}</select><button className="refresh approve" disabled={operationsBusy} onClick={() => void assignBooking(booking.id)}>Assign walk</button></div></div><span className="pill pending">Requested</span></div>)}</div>}
           {assignmentBookings.some((booking) => booking.status === 'assigned') ? <p className="notice inline-notice">{assignmentBookings.filter((booking) => booking.status === 'assigned').length} walk(s) already assigned. Walker sees only their own assigned walks.</p> : null}
         </section>
         <section className="panel route-panel" id="pricing">
