@@ -242,6 +242,13 @@ begin
   where id=p_payment_id and status='pending'
   for update;
   if not found then raise exception 'Pending Sunday payment not found or already reviewed'; end if;
+  if not exists (
+    select 1 from public.bookings b
+    where b.id=v_booking_id and b.customer_id=v_customer_id
+      and b.service_type='sunday_extra' and b.status='requested'
+  ) then
+    raise exception 'Sunday booking is no longer awaiting payment review';
+  end if;
 
   update public.booking_payments
   set status=p_decision,verified_by=auth.uid(),verified_at=now(),
