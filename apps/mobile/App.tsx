@@ -15,7 +15,7 @@ type Subscription = { id: string; dog_id: string; walks_per_day: number; duratio
 type CustomerWalk = { id: string; scheduled_at: string; service_address: string; service_slot: string | null; status: string; actual_started_at: string | null; actual_ended_at: string | null; actual_duration_minutes: number | null; walk_report: string | null; dog: { name: string } | null };
 type CustomerChangeRequest = { id: string; booking_id: string; status: string; proposed_scheduled_at: string | null; proposed_service_address: string | null; proposed_service_slot: string | null; admin_note: string | null; created_at: string };
 type WalkSchedule = { id: string; subscription_id: string; dog_id: string; morning_time: string | null; evening_time: string | null; service_address: string; service_latitude: number | null; service_longitude: number | null; customer_notes: string | null };
-type ScheduleChangeRequest = { id: string; status: string; admin_note: string | null; created_at: string };
+type ScheduleChangeRequest = { id: string; dog_id: string; status: string; admin_note: string | null; created_at: string };
 type RoutePoint = { id: number; booking_id: string; latitude: number; longitude: number; recorded_at: string };
 type AssignedWalk = { id: string; scheduled_at: string; duration_minutes: number; service_address: string; customer_notes: string | null; status: string; actual_started_at: string | null; actual_ended_at: string | null; actual_duration_minutes: number | null; walk_report: string | null; dog: { name: string; breed: string | null } | null };
 
@@ -132,7 +132,7 @@ export default function App() {
       supabase.from('dog_subscriptions').select('id, dog_id, walks_per_day, duration_minutes, monthly_price_inr, starts_on, ends_on, status').eq('customer_id', userId).order('created_at', { ascending: false }),
       supabase.from('pay_later_requests').select('id, dog_id, status, created_at').eq('customer_id', userId).order('created_at', { ascending: false }),
       supabase.from('subscription_walk_schedules').select('id, subscription_id, dog_id, morning_time, evening_time, service_address, service_latitude, service_longitude, customer_notes').eq('customer_id', userId),
-      supabase.from('subscription_schedule_change_requests').select('id, status, admin_note, created_at').eq('customer_id', userId).order('created_at', { ascending: false }),
+      supabase.from('subscription_schedule_change_requests').select('id, dog_id, status, admin_note, created_at').eq('customer_id', userId).order('created_at', { ascending: false }),
     ]);
     const failed = dogResult.error || packageResult.error || subscriptionResult.error || payLaterResult.error || scheduleResult.error || scheduleChangeResult.error;
     if (failed) setError('जानकारी load नहीं हुई: ' + failed.message);
@@ -605,7 +605,7 @@ export default function App() {
                   <Text style={styles.label}>Walker instructions (optional)</Text>
                   <TextInput value={bookingNotes} onChangeText={setBookingNotes} placeholder="Gate entry, leash, behaviour notes..." multiline style={[styles.input, styles.multiline]} maxLength={1000} />
                   {walkSchedules.filter((item) => item.subscription_id === selectedDogSubscription.id).map((item) => <View key={item.id} style={styles.empty}><Text style={styles.body}>Current schedule: {item.morning_time ? 'Morning ' + item.morning_time.slice(0,5) : ''}{item.morning_time && item.evening_time ? ' · ' : ''}{item.evening_time ? 'Evening ' + item.evening_time.slice(0,5) : ''}</Text><Text style={styles.body}>{item.service_address}</Text></View>)}
-                  {scheduleChangeRequests.filter((item) => item.status === 'pending').slice(0,2).map((item) => <Text key={item.id} style={styles.footnote}>Schedule change pending Admin approval · {item.admin_note || 'Old schedule remains active'}</Text>)}
+                  {scheduleChangeRequests.filter((item) => item.dog_id === selectedDogSubscription.dog_id).slice(0,2).map((item) => <Text key={item.id} style={styles.footnote}>Schedule change {item.status} · {item.admin_note || (item.status === 'pending' ? 'Old schedule remains active' : 'Admin reviewed the request')}</Text>)}
                   <Pressable style={[styles.primaryButton, busy && styles.disabled]} onPress={() => void saveWeeklyWalkSchedule()} disabled={busy}>{busy ? <ActivityIndicator color="#fff" /> : <Text style={styles.primaryText}>Save weekly schedule</Text>}</Pressable>
                 </> : <Text style={styles.body}>इस dog के लिए active monthly package नहीं है। पहले package activate करवाएँ।</Text>}
               </View>
