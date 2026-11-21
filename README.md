@@ -22,7 +22,9 @@ DOJO WALK is a dog-walking service platform for customers, walkers, and administ
 - [x] Walker assigned-walk list with assigned dog details (read-only).
 - [x] Walker Start/Stop controls backed by restricted authenticated RPC functions.
 - [x] Foreground GPS point capture and background-location task configuration with foreground fallback.
-- [ ] Customer/Admin live map and completed route-history screens.
+- [x] Customer walk tracking/history screen with latest GPS map link and route point summary.
+- [x] Admin live walk/route-history panel with realtime refresh and latest GPS map links.
+- [ ] Draw full GPS polylines on embedded maps and test realtime on physical devices.
 - [ ] Admin payment verification, walker assignment, pricing, and payout management.
 - [ ] End-to-end testing and Android/iOS release builds.
 
