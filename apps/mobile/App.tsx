@@ -257,7 +257,7 @@ export default function App() {
     } else {
       locationSubscription.current?.remove();
       locationSubscription.current = null;
-      if (await TaskManager.isTaskRegisteredAsync(WALK_LOCATION_TASK)) {
+      if (await Location.hasStartedLocationUpdatesAsync(WALK_LOCATION_TASK)) {
         await Location.stopLocationUpdatesAsync(WALK_LOCATION_TASK);
       }
       globalThis.localStorage?.removeItem('dojo_active_booking_id');
