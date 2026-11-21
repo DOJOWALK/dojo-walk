@@ -123,6 +123,101 @@ begin
 end;
 $function$;
 
+-- Share one advisory-lock namespace across monthly package and Sunday UPI submissions.
+-- This closes the race where the same UPI reference could be submitted to both flows at once.
+create or replace function public.customer_submit_package_payment(
+  p_dog_id uuid,
+  p_package_id uuid,
+  p_upi_transaction_ref text
+) returns uuid
+language plpgsql
+security definer
+set search_path = ''
+as $function$
+declare
+  v_customer_id uuid := auth.uid();
+  v_package public.service_packages%rowtype;
+  v_subscription_id uuid;
+  v_start_date date;
+  v_end_date date;
+begin
+  if v_customer_id is null then
+    raise exception 'Please sign in before submitting a payment.';
+  end if;
+  if not exists (
+    select 1 from public.profiles p
+    where p.id = v_customer_id and p.role = 'customer'
+  ) then
+    raise exception 'Only customer accounts can request a package.';
+  end if;
+  if p_upi_transaction_ref is null
+     or length(btrim(p_upi_transaction_ref)) < 6
+     or length(btrim(p_upi_transaction_ref)) > 100 then
+    raise exception 'Enter a valid UPI transaction reference (6 to 100 characters).';
+  end if;
+
+  perform pg_advisory_xact_lock(hashtextextended(lower(btrim(p_upi_transaction_ref)), 0));
+
+  if exists (
+    select 1 from public.subscription_payments sp
+    where lower(btrim(sp.upi_transaction_ref)) = lower(btrim(p_upi_transaction_ref))
+  ) or exists (
+    select 1 from public.booking_payments bp
+    where lower(btrim(bp.upi_transaction_ref)) = lower(btrim(p_upi_transaction_ref))
+  ) then
+    raise exception 'This UPI transaction reference has already been submitted.';
+  end if;
+
+  if not exists (
+    select 1 from public.dogs d
+    where d.id = p_dog_id and d.customer_id = v_customer_id
+  ) then
+    raise exception 'This dog does not belong to your account.';
+  end if;
+
+  select * into v_package
+  from public.service_packages sp
+  where sp.id = p_package_id and sp.active = true;
+  if not found then
+    raise exception 'This package is unavailable. Please refresh and try again.';
+  end if;
+
+  if exists (
+    select 1 from public.dog_subscriptions ds
+    where ds.dog_id = p_dog_id
+      and ds.status in ('active', 'pending_payment')
+  ) then
+    raise exception 'This dog already has an active package or a payment awaiting verification.';
+  end if;
+
+  v_start_date := (now() at time zone 'Asia/Kolkata')::date;
+  v_end_date := (v_start_date + interval '1 month' - interval '1 day')::date;
+
+  insert into public.dog_subscriptions (
+    dog_id, customer_id, package_id, walks_per_day,
+    duration_minutes, monthly_price_inr, starts_on, ends_on, status
+  )
+  values (
+    p_dog_id, v_customer_id, v_package.id, v_package.walks_per_day,
+    v_package.duration_minutes, v_package.monthly_price_inr,
+    v_start_date, v_end_date, 'pending_payment'
+  )
+  returning id into v_subscription_id;
+
+  insert into public.subscription_payments (
+    subscription_id, customer_id, amount_inr, upi_transaction_ref, status
+  )
+  values (
+    v_subscription_id, v_customer_id, v_package.monthly_price_inr,
+    btrim(p_upi_transaction_ref), 'pending'
+  );
+  return v_subscription_id;
+end;
+$function$;
+
+revoke all on function public.customer_submit_package_payment(uuid,uuid,text) from public,anon;
+grant execute on function public.customer_submit_package_payment(uuid,uuid,text) to authenticated;
+
 create or replace function public.customer_list_sunday_extra_walk_payments()
 returns table (
   booking_id uuid,
