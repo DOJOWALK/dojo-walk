@@ -29,7 +29,7 @@ DOJO WALK is a dog-walking service platform for customers, walkers, and administ
 - [ ] Admin payment verification, walker assignment, pricing, and payout management.
 - [ ] End-to-end testing and Android/iOS release builds.
 
-The current screens are development scaffolding, not a production-ready or published app. Customer dog profiles can be added and active packages can be viewed. Embedded maps draw the recorded route points when available; map tiles require an internet connection. Subscription activation and payment submission/approval are not yet enabled from the UI. Walker start/stop and GPS capture are coded but have not yet been built or tested on physical Android/iPhone devices. Background GPS requires a native development build and OS permission; Expo Go is not sufficient.
+The current screens are development scaffolding, not a production-ready or published app. Customer dog profiles can be added and active packages can be viewed. Embedded maps draw the recorded route points when available; map tiles require an internet connection. The mobile route view uses the native map provider (Google Maps on Android, Apple Maps by default on iOS); a production Android build needs a Google Maps SDK API key configured in the native build. Subscription activation and payment submission/approval are not yet enabled from the UI. Walker start/stop and GPS capture are coded but have not yet been built or tested on physical Android/iPhone devices. Background GPS requires a native development build and OS permission; Expo Go is not sufficient.
 
 ## Business rules captured for implementation
 
