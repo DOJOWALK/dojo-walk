@@ -13,7 +13,9 @@ type Dog = { id: string; name: string; breed: string | null; age_years: number |
 type Package = { id: string; walks_per_day: number; duration_minutes: number; monthly_price_inr: number };
 type Subscription = { id: string; dog_id: string; walks_per_day: number; duration_minutes: number; monthly_price_inr: number; starts_on: string; ends_on: string; status: string };
 type CustomerWalk = { id: string; scheduled_at: string; service_address: string; service_slot: string | null; status: string; actual_started_at: string | null; actual_ended_at: string | null; actual_duration_minutes: number | null; walk_report: string | null; dog: { name: string } | null };
-type CustomerChangeRequest = { id: string; booking_id: string; status: string; proposed_scheduled_at: string | null; proposed_service_address: string | null; proposed_service_slot: string | null; admin_note: string | null; created_at: string };\ntype WalkSchedule = { id: string; subscription_id: string; dog_id: string; morning_time: string | null; evening_time: string | null; service_address: string; service_latitude: number | null; service_longitude: number | null; customer_notes: string | null };\ntype ScheduleChangeRequest = { id: string; status: string; admin_note: string | null; created_at: string };
+type CustomerChangeRequest = { id: string; booking_id: string; status: string; proposed_scheduled_at: string | null; proposed_service_address: string | null; proposed_service_slot: string | null; admin_note: string | null; created_at: string };
+type WalkSchedule = { id: string; subscription_id: string; dog_id: string; morning_time: string | null; evening_time: string | null; service_address: string; service_latitude: number | null; service_longitude: number | null; customer_notes: string | null };
+type ScheduleChangeRequest = { id: string; status: string; admin_note: string | null; created_at: string };
 type RoutePoint = { id: number; booking_id: string; latitude: number; longitude: number; recorded_at: string };
 type AssignedWalk = { id: string; scheduled_at: string; duration_minutes: number; service_address: string; customer_notes: string | null; status: string; actual_started_at: string | null; actual_ended_at: string | null; actual_duration_minutes: number | null; walk_report: string | null; dog: { name: string; breed: string | null } | null };
 
@@ -69,7 +71,11 @@ export default function App() {
   const [error, setError] = useState('');
   const [dogs, setDogs] = useState<Dog[]>([]);
   const [packages, setPackages] = useState<Package[]>([]);
-  const [subscriptions, setSubscriptions] = useState<Subscription[]>([]);\n  const [walkSchedules, setWalkSchedules] = useState<WalkSchedule[]>([]);\n  const [scheduleChangeRequests, setScheduleChangeRequests] = useState<ScheduleChangeRequest[]>([]);\n  const [scheduleMorningTime, setScheduleMorningTime] = useState('08:00');\n  const [scheduleEveningTime, setScheduleEveningTime] = useState('18:00');
+  const [subscriptions, setSubscriptions] = useState<Subscription[]>([]);
+  const [walkSchedules, setWalkSchedules] = useState<WalkSchedule[]>([]);
+  const [scheduleChangeRequests, setScheduleChangeRequests] = useState<ScheduleChangeRequest[]>([]);
+  const [scheduleMorningTime, setScheduleMorningTime] = useState('08:00');
+  const [scheduleEveningTime, setScheduleEveningTime] = useState('18:00');
   const [selectedDogId, setSelectedDogId] = useState('');
   const [selectedPackageId, setSelectedPackageId] = useState('');
   const [upiTransactionRef, setUpiTransactionRef] = useState('');
@@ -124,7 +130,9 @@ export default function App() {
       supabase.from('dogs').select('id, name, breed, age_years, notes, service_address, service_latitude, service_longitude').eq('customer_id', userId).order('created_at', { ascending: false }),
       supabase.from('service_packages').select('id, walks_per_day, duration_minutes, monthly_price_inr').eq('active', true).order('walks_per_day'),
       supabase.from('dog_subscriptions').select('id, dog_id, walks_per_day, duration_minutes, monthly_price_inr, starts_on, ends_on, status').eq('customer_id', userId).order('created_at', { ascending: false }),
-      supabase.from('pay_later_requests').select('id, dog_id, status, created_at').eq('customer_id', userId).order('created_at', { ascending: false }),\n      supabase.from('subscription_walk_schedules').select('id, subscription_id, dog_id, morning_time, evening_time, service_address, service_latitude, service_longitude, customer_notes').eq('customer_id', userId),\n      supabase.from('subscription_schedule_change_requests').select('id, status, admin_note, created_at').eq('customer_id', userId).order('created_at', { ascending: false }),
+      supabase.from('pay_later_requests').select('id, dog_id, status, created_at').eq('customer_id', userId).order('created_at', { ascending: false }),
+      supabase.from('subscription_walk_schedules').select('id, subscription_id, dog_id, morning_time, evening_time, service_address, service_latitude, service_longitude, customer_notes').eq('customer_id', userId),
+      supabase.from('subscription_schedule_change_requests').select('id, status, admin_note, created_at').eq('customer_id', userId).order('created_at', { ascending: false }),
     ]);
     const failed = dogResult.error || packageResult.error || subscriptionResult.error || payLaterResult.error || scheduleResult.error || scheduleChangeResult.error;
     if (failed) setError('जानकारी load नहीं हुई: ' + failed.message);
@@ -132,7 +140,9 @@ export default function App() {
       setDogs((dogResult.data ?? []) as Dog[]);
       if (!selectedDogId && dogResult.data?.length) setSelectedDogId(dogResult.data[0].id);
       setPackages((packageResult.data ?? []) as Package[]);
-      setSubscriptions((subscriptionResult.data ?? []) as Subscription[]);\n      setWalkSchedules((scheduleResult.data ?? []) as WalkSchedule[]);\n      setScheduleChangeRequests((scheduleChangeResult.data ?? []) as ScheduleChangeRequest[]);
+      setSubscriptions((subscriptionResult.data ?? []) as Subscription[]);
+      setWalkSchedules((scheduleResult.data ?? []) as WalkSchedule[]);
+      setScheduleChangeRequests((scheduleChangeResult.data ?? []) as ScheduleChangeRequest[]);
       setPayLaterRequests((payLaterResult.data ?? []) as { id: string; dog_id: string; status: string; created_at: string }[]);
     }
     setLoadingData(false);
@@ -318,7 +328,7 @@ export default function App() {
 
   async function saveWeeklyWalkSchedule() {
     if (!supabase || !selectedDogSubscription) { setError('पहले active package वाला dog चुनें।'); return; }
-    const validTime = (value: string) => /^(?:[01]\\d|2[0-3]):[0-5]\\d$/.test(value.trim());
+    const validTime = (value: string) => /^(?:[01]\d|2[0-3]):[0-5]\d$/.test(value.trim());
     const morning = selectedDogSubscription.walks_per_day === 2 || bookingSlot === 'morning' ? scheduleMorningTime.trim() : '';
     const evening = selectedDogSubscription.walks_per_day === 2 || bookingSlot === 'evening' ? scheduleEveningTime.trim() : '';
     if ((morning && !validTime(morning)) || (evening && !validTime(evening))) { setError('Time HH:MM format में डालें, जैसे 08:00 या 18:30।'); return; }
@@ -589,7 +599,7 @@ export default function App() {
                   {scheduleChangeRequests.filter((item) => item.status === 'pending').slice(0,2).map((item) => <Text key={item.id} style={styles.footnote}>Schedule change pending Admin approval · {item.admin_note || 'Old schedule remains active'}</Text>)}
                   <Pressable style={[styles.primaryButton, busy && styles.disabled]} onPress={() => void saveWeeklyWalkSchedule()} disabled={busy}>{busy ? <ActivityIndicator color="#fff" /> : <Text style={styles.primaryText}>Save weekly schedule</Text>}</Pressable>
                 </> : <Text style={styles.body}>इस dog के लिए active monthly package नहीं है। पहले package activate करवाएँ।</Text>}
-              </View>>
+              </View>
               <View style={styles.sectionHeader}><View><Text style={styles.sectionTitle}>Walk Tracking & History</Text><Text style={styles.sectionHint}>Active walk की latest location और completed route points</Text></View><Pressable style={styles.smallPrimary} onPress={() => void loadCustomerWalks()}><Text style={styles.smallPrimaryText}>Refresh</Text></Pressable></View>
               {customerWalks.length === 0 ? <View style={styles.empty}><Text style={styles.emptyTitle}>अभी कोई active या completed walk नहीं है</Text><Text style={styles.body}>Walk शुरू होने के बाद location और route यहाँ दिखाई देंगे।</Text></View> : customerWalks.map((walk) => {
                 const points = customerRoutePoints.filter((point) => point.booking_id === walk.id);
