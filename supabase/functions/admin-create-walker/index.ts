@@ -58,6 +58,8 @@ Deno.serve(async (req: Request) => {
   const phone = typeof input.phone === "string" ? input.phone.trim() : "";
   const experience = Number(input.experience_years);
   const bio = typeof input.bio === "string" ? input.bio.trim() : "";
+  const localAddress = typeof input.local_address === "string" ? input.local_address.trim() : "";
+  const permanentAddress = typeof input.permanent_address === "string" ? input.permanent_address.trim() : "";
   const serviceAreas = Array.isArray(input.service_areas)
     ? [...new Set(input.service_areas.filter((area): area is string => typeof area === "string").map((area) => area.trim()).filter(Boolean))]
     : [];
@@ -66,6 +68,8 @@ Deno.serve(async (req: Request) => {
   if (!/^\+91[6-9]\d{9}$/.test(phone)) return json({ error: "Enter a valid Indian mobile number in +91 format" }, 400);
   if (!Number.isFinite(experience) || experience < 0 || experience > 60) return json({ error: "Experience must be between 0 and 60 years" }, 400);
   if (bio.length > 1000) return json({ error: "Bio must be 1000 characters or fewer" }, 400);
+  if (localAddress.length < 5 || localAddress.length > 500) return json({ error: "Enter a valid local address (5 to 500 characters)" }, 400);
+  if (permanentAddress.length < 5 || permanentAddress.length > 500) return json({ error: "Enter a valid permanent address (5 to 500 characters)" }, 400);
   if (serviceAreas.length < 1 || serviceAreas.length > 10 || serviceAreas.some((area) => area.length > 80)) {
     return json({ error: "Enter 1 to 10 service areas (each up to 80 characters)" }, 400);
   }
@@ -96,6 +100,8 @@ Deno.serve(async (req: Request) => {
     service_areas: serviceAreas,
     experience_years: experience,
     bio: bio || null,
+    local_address: localAddress,
+    permanent_address: permanentAddress,
     verification_status: "approved",
     approved_at: new Date().toISOString(),
   });
