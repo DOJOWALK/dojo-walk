@@ -24,6 +24,8 @@ DOJO WALK is a dog-walking service platform for customers, walkers, and administ
 - [x] Foreground GPS point capture and background-location task configuration with foreground fallback.
 - [x] Customer walk tracking/history screen with latest GPS map link and route point summary.
 - [x] Admin live walk/route-history panel with realtime refresh and latest GPS map links.
+- [x] Embedded GPS route maps with start/end markers and route polylines in customer app and Admin dashboard.
+- [ ] Test realtime route updates and GPS accuracy on physical devices.
 - [ ] Draw full GPS polylines on embedded maps and test realtime on physical devices.
 - [ ] Admin payment verification, walker assignment, pricing, and payout management.
 - [ ] End-to-end testing and Android/iOS release builds.
@@ -62,3 +64,8 @@ The mobile login uses Supabase phone OTP. Before SMS login can work, enable Phon
 ## Security
 
 Never commit Supabase service-role keys, passwords, OTPs, or other secrets. Client apps use publishable credentials and depend on Row Level Security for data access. Test all RLS policies with separate customer, walker, and admin accounts before launch.
+
+
+## Embedded route maps
+
+Customer and Admin screens can render recorded GPS points as an embedded route map. Map tiles require an internet connection. The mobile map uses the native map provider (Google Maps on Android and Apple Maps by default on iOS). Android production builds need a restricted Google Maps SDK API key configured in the native build environment; never commit the key. Physical-device route, background GPS, permissions, and map rendering tests are still required before release.
