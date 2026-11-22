@@ -96,7 +96,8 @@ Deno.serve(async (req: Request) => {
     service_areas: serviceAreas,
     experience_years: experience,
     bio: bio || null,
-    verification_status: "pending",
+    verification_status: "approved",
+    approved_at: new Date().toISOString(),
   });
 
   if (walkerError) {
@@ -108,7 +109,7 @@ Deno.serve(async (req: Request) => {
     walker_id: walkerId,
     full_name: fullName,
     phone,
-    verification_status: "pending",
+    account_status: "active",
     phone_verification_required: true,
   }, 201);
 });
