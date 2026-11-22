@@ -31,14 +31,26 @@ begin
     raise exception 'Invalid Indian mobile number';
   end if;
 
+  if not exists (
+    select 1
+    from auth.users u
+    join public.profiles p on p.id = u.id
+    where u.id = p_walker_id
+      and u.phone = p_phone
+      and p.role = 'customer'
+  ) then
+    raise exception 'New customer Auth profile and phone do not match';
+  end if;
+
   update public.profiles
   set role = 'walker',
       full_name = btrim(p_full_name),
       phone = p_phone
-  where id = p_walker_id;
+  where id = p_walker_id
+    and role = 'customer';
 
   if not found then
-    raise exception 'Walker profile does not exist';
+    raise exception 'New customer profile could not be promoted to Walker';
   end if;
 end;
 $$;
