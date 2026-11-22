@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { isSupabaseConfigured, supabase } from './lib/supabase';
 
 type AdminProfile = { role: string };
-type WalkerAdmin = { id: string; service_areas: string[]; experience_years: number; verification_status: string; profile: { full_name: string | null; phone: string | null } | null };
+type WalkerAdmin = { id: string; service_areas: string[]; experience_years: number; verification_status: string; account_status: string; profile: { full_name: string | null; phone: string | null } | null };
 type AssignmentBooking = { id: string; scheduled_at: string; duration_minutes: number; service_address: string; service_slot: string | null; service_latitude: number | null; service_longitude: number | null; status: string; walker_id: string | null; dog: { name: string } | null; customer: { full_name: string | null; phone: string | null } | null };
 type PricingRow = { id: string; duration_minutes: number; price_inr: number; is_active: boolean };
 type AdminCustomer = { id: string; full_name: string | null; phone: string | null; dogs: { id: string; name: string; breed: string | null; age_years: number | null; service_address: string | null; service_latitude: number | null; service_longitude: number | null }[] };
@@ -228,7 +228,7 @@ export default function App() {
     setOperationsBusy(true);
     const [walkerResult, bookingResult, pricingResult, payoutResult, customerResult, changeRequestResult, scheduleChangeResult] = await Promise.all([
       supabase.from('walkers')
-        .select('id,service_areas,experience_years,verification_status,profile:profiles!walkers_id_fkey(full_name,phone)')
+        .select('id,service_areas,experience_years,verification_status,account_status,profile:profiles!walkers_id_fkey(full_name,phone)')
         .order('created_at', { ascending: false }),
       supabase.from('bookings')
         .select('id,scheduled_at,duration_minutes,service_address,service_slot,service_latitude,service_longitude,status,walker_id,dog:dogs(name),customer:profiles!bookings_customer_id_fkey(full_name,phone)')
@@ -292,23 +292,24 @@ export default function App() {
       setOperationsMessage('Walker account नहीं बना: ' + (data?.error || createError?.message || 'Unknown error'));
     } else {
       setWalkerName(''); setWalkerPhone(''); setWalkerExperience('0'); setWalkerBio('');
-      setOperationsMessage('Walker account बन गया। Phone OTP verification और Admin approval के बाद ही वह assignment के लिए eligible होगा।');
+      setOperationsMessage('Walker account बन गया। Mobile OTP verify होने के बाद वह काम कर सकेगा।');
       await loadOperations();
     }
     setOperationsBusy(false);
   }
 
-  async function reviewWalker(walkerId: string, decision: 'approved' | 'rejected') {
+  async function updateWalkerAccountStatus(walkerId: string, status: 'active' | 'on_hold' | 'suspended' | 'deactivated') {
     if (!supabase) return;
-    if (decision === 'rejected' && !window.confirm('क्या आप इस walker को reject करना चाहते हैं?')) return;
+    const labels = { active: 'Active', on_hold: 'On Hold', suspended: 'Suspended', deactivated: 'Deactivated' };
+    if (!window.confirm('Walker account को ' + labels[status] + ' करना है?')) return;
     setOperationsBusy(true); setOperationsMessage('');
-    const { data, error: reviewError } = await supabase.functions.invoke('admin-review-walker', {
-      body: { walker_id: walkerId, decision },
+    const { data, error: statusError } = await supabase.functions.invoke('admin-set-walker-status', {
+      body: { walker_id: walkerId, account_status: status },
     });
-    if (reviewError || data?.error) {
-      setOperationsMessage('Walker status update नहीं हुआ: ' + (data?.error || reviewError?.message || 'Unknown error'));
+    if (statusError || data?.error) {
+      setOperationsMessage('Walker status update नहीं हुआ: ' + (data?.error || statusError?.message || 'Unknown error'));
     } else {
-      setOperationsMessage(decision === 'approved' ? 'Walker approve हो गया।' : 'Walker reject हो गया.');
+      setOperationsMessage('Walker account status: ' + labels[status]);
     }
     await loadOperations();
     setOperationsBusy(false);
@@ -609,10 +610,10 @@ export default function App() {
           {adminCustomers.length === 0 ? <p className="empty">अभी कोई customer account नहीं है।</p> : <div className="table-wrap"><table><thead><tr><th>Customer</th><th>Phone</th><th>Dogs & service location</th></tr></thead><tbody>{adminCustomers.map((customer) => <tr key={customer.id}><td>{customer.full_name || customer.id.slice(0, 8)}</td><td>{customer.phone || '—'}</td><td>{customer.dogs.length ? customer.dogs.map((dog) => dog.name + (dog.breed ? ' · ' + dog.breed : '') + (dog.service_address ? ' · ' + dog.service_address : ' · Address missing') + (dog.service_latitude !== null && dog.service_longitude !== null ? ' · Pin ' + dog.service_latitude.toFixed(4) + ', ' + dog.service_longitude.toFixed(4) : '')).join(' | ') : 'No dog added yet'}</td></tr>)}</tbody></table></div>}
         </section>
         <section className="panel route-panel" id="walkers">
-          <div className="panel-heading"><div><h3>Walker management</h3><p>New walker accounts stay pending until Admin approval.</p></div><button className="refresh" onClick={() => void loadOperations()} disabled={operationsBusy}>Refresh</button></div>
+          <div className="panel-heading"><div><h3>Walker management</h3><p>Admin creates and verifies each Walker profile. New accounts are Active; Admin can hold or close them later.</p></div><button className="refresh" onClick={() => void loadOperations()} disabled={operationsBusy}>Refresh</button></div>
           <div className="credit-form">
             <h4>Create walker account</h4>
-            <p className="muted">Admin account बनाएगा। Walker अपने mobile पर OTP verify करेगा; approval से पहले उसे walk assign नहीं होगी।</p>
+            <p className="muted">Admin पूरा account बनाएगा। Walker अपने registered mobile पर OTP verify करके login करेगा। कोई approval/rejection step नहीं है।</p>
             <label>Walker full name<input value={walkerName} onChange={(event) => setWalkerName(event.target.value)} placeholder="Full name" maxLength={100} /></label>
             <label>Indian mobile number<input value={walkerPhone} onChange={(event) => setWalkerPhone(event.target.value)} placeholder="9876543210" inputMode="tel" maxLength={14} /></label>
             <label>Experience (years)<input type="number" min="0" max="60" step="0.5" value={walkerExperience} onChange={(event) => setWalkerExperience(event.target.value)} /></label>
@@ -620,7 +621,7 @@ export default function App() {
             <label>Short bio (optional)<input value={walkerBio} onChange={(event) => setWalkerBio(event.target.value)} placeholder="Experience with dogs…" maxLength={1000} /></label>
             <button className="refresh approve" disabled={operationsBusy} onClick={() => void createWalkerAccount()}>{operationsBusy ? 'Please wait…' : 'Create walker account'}</button>
           </div>
-          {walkersAdmin.length === 0 ? <p className="empty">अभी कोई walker account नहीं है।</p> : <div className="table-wrap"><table><thead><tr><th>Walker</th><th>Phone</th><th>Experience</th><th>Status</th><th>Action</th></tr></thead><tbody>{walkersAdmin.map((walker) => <tr key={walker.id}><td>{walker.profile?.full_name || walker.id.slice(0, 8)}</td><td>{walker.profile?.phone || '—'}</td><td>{walker.experience_years} years</td><td><span className={'pill ' + walker.verification_status}>{walker.verification_status}</span></td><td>{walker.verification_status === 'pending' ? <div className="payment-actions"><button className="refresh approve" disabled={operationsBusy} onClick={() => void reviewWalker(walker.id, 'approved')}>Approve</button><button className="refresh reject" disabled={operationsBusy} onClick={() => void reviewWalker(walker.id, 'rejected')}>Reject</button></div> : walker.verification_status === 'approved' ? <span className="subtle-count">Eligible for assignment</span> : '—'}</td></tr>)}</tbody></table></div>}
+          {walkersAdmin.length === 0 ? <p className="empty">अभी कोई walker account नहीं है।</p> : <div className="table-wrap"><table><thead><tr><th>Walker</th><th>Phone</th><th>Experience</th><th>Account Status</th><th>Action</th></tr></thead><tbody>{walkersAdmin.map((walker) => <tr key={walker.id}><td>{walker.profile?.full_name || walker.id.slice(0, 8)}</td><td>{walker.profile?.phone || '—'}</td><td>{walker.experience_years} years</td><td><span className={'pill ' + walker.account_status}>{walker.account_status.replace('_', ' ')}</span></td><td><div className="payment-actions">{walker.account_status === 'active' ? <><button className="refresh" disabled={operationsBusy} onClick={() => void updateWalkerAccountStatus(walker.id, 'on_hold')}>Hold</button><button className="refresh reject" disabled={operationsBusy} onClick={() => void updateWalkerAccountStatus(walker.id, 'suspended')}>Suspend</button><button className="refresh reject" disabled={operationsBusy} onClick={() => void updateWalkerAccountStatus(walker.id, 'deactivated')}>Deactivate</button></> : walker.account_status === 'deactivated' ? <span className="subtle-count">Closed</span> : <><button className="refresh approve" disabled={operationsBusy} onClick={() => void updateWalkerAccountStatus(walker.id, 'active')}>Reactivate</button><button className="refresh reject" disabled={operationsBusy} onClick={() => void updateWalkerAccountStatus(walker.id, 'deactivated')}>Deactivate</button></>}</div></td></tr>)}</tbody></table></div>}
         </section>
         <section className="panel route-panel" id="weekly-schedule-requests">
           <div className="panel-heading"><div><h3>Weekly schedule change requests</h3><p>Customer ke recurring morning/evening time aur service address changes review karein. Approval se pehle old schedule active rehta hai.</p></div><button className="refresh" onClick={() => void loadOperations()} disabled={operationsBusy}>Refresh</button></div>
@@ -632,7 +633,7 @@ export default function App() {
         </section>
         <section className="panel route-panel" id="assignments">
           <div className="panel-heading"><div><h3>Walk assignment</h3><p>Assign each requested walk to one approved walker.</p></div></div>
-          {assignmentBookings.filter((booking) => booking.status === 'requested').length === 0 ? <p className="empty">कोई unassigned walk request नहीं है।</p> : <div className="payment-list">{assignmentBookings.filter((booking) => booking.status === 'requested').map((booking) => <div className="payment-row payment-review-row" key={booking.id}><div><strong>{booking.dog?.name || 'Dog'} · {booking.duration_minutes} min</strong><small>{booking.customer?.full_name || 'Customer'} {booking.customer?.phone ? '· ' + booking.customer.phone : ''}</small><small>{dateTime(booking.scheduled_at)} · {booking.service_slot ? booking.service_slot.toUpperCase() + ' · ' : ''}{booking.service_address}</small>{booking.service_latitude !== null && booking.service_longitude !== null ? <small><a className="map-link" href={'https://www.openstreetmap.org/?mlat=' + booking.service_latitude + '&mlon=' + booking.service_longitude + '#map=17/' + booking.service_latitude + '/' + booking.service_longitude} target="_blank" rel="noreferrer">Open pickup pin ↗</a></small> : null}<div className="payment-actions"><select value={walkerSelections[booking.id] || ''} onChange={(event) => setWalkerSelections((current) => ({ ...current, [booking.id]: event.target.value }))}><option value="">Approved walker चुनें</option>{walkersAdmin.filter((walker) => walker.verification_status === 'approved').map((walker) => <option key={walker.id} value={walker.id}>{walker.profile?.full_name || walker.profile?.phone || walker.id.slice(0, 8)}</option>)}</select><button className="refresh approve" disabled={operationsBusy} onClick={() => void assignBooking(booking.id)}>Assign walk</button></div></div><span className="pill pending">Requested</span></div>)}</div>}
+          {assignmentBookings.filter((booking) => booking.status === 'requested').length === 0 ? <p className="empty">कोई unassigned walk request नहीं है।</p> : <div className="payment-list">{assignmentBookings.filter((booking) => booking.status === 'requested').map((booking) => <div className="payment-row payment-review-row" key={booking.id}><div><strong>{booking.dog?.name || 'Dog'} · {booking.duration_minutes} min</strong><small>{booking.customer?.full_name || 'Customer'} {booking.customer?.phone ? '· ' + booking.customer.phone : ''}</small><small>{dateTime(booking.scheduled_at)} · {booking.service_slot ? booking.service_slot.toUpperCase() + ' · ' : ''}{booking.service_address}</small>{booking.service_latitude !== null && booking.service_longitude !== null ? <small><a className="map-link" href={'https://www.openstreetmap.org/?mlat=' + booking.service_latitude + '&mlon=' + booking.service_longitude + '#map=17/' + booking.service_latitude + '/' + booking.service_longitude} target="_blank" rel="noreferrer">Open pickup pin ↗</a></small> : null}<div className="payment-actions"><select value={walkerSelections[booking.id] || ''} onChange={(event) => setWalkerSelections((current) => ({ ...current, [booking.id]: event.target.value }))}><option value="">Approved walker चुनें</option>{walkersAdmin.filter((walker) => walker.account_status === 'active').map((walker) => <option key={walker.id} value={walker.id}>{walker.profile?.full_name || walker.profile?.phone || walker.id.slice(0, 8)}</option>)}</select><button className="refresh approve" disabled={operationsBusy} onClick={() => void assignBooking(booking.id)}>Assign walk</button></div></div><span className="pill pending">Requested</span></div>)}</div>}
           {assignmentBookings.some((booking) => booking.status === 'assigned') ? <p className="notice inline-notice">{assignmentBookings.filter((booking) => booking.status === 'assigned').length} walk(s) already assigned. Walker sees only their own assigned walks.</p> : null}
         </section>
         <section className="panel route-panel" id="pricing">
