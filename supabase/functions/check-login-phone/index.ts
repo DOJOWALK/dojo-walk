@@ -14,18 +14,13 @@ function json(body: Record<string, unknown>, status = 200) {
 }
 
 function getClientIp(req: Request): string | null {
-  // Prefer the edge-proxy supplied client IP. The fallback uses the first
-  // X-Forwarded-For entry; verify the hosted gateway's overwrite/append behavior
-  // before production use so an untrusted client cannot choose this value.
+  // Do not fall back to X-Forwarded-For: callers can sometimes prepend a
+  // forged address. Only use Cloudflare's client-IP header. Before production,
+  // verify on the hosted function URL that a caller-supplied forged value is
+  // overwritten by the ingress proxy; otherwise use a trusted gateway identity
+  // or an upstream rate limiter.
   const cfIp = req.headers.get("cf-connecting-ip")?.trim();
-  if (cfIp) return cfIp;
-
-  const forwardedFor = req.headers.get("x-forwarded-for");
-  if (forwardedFor) {
-    const firstIp = forwardedFor.split(",")[0]?.trim();
-    if (firstIp) return firstIp;
-  }
-  return null;
+  return cfIp || null;
 }
 
 Deno.serve(async (req: Request) => {
