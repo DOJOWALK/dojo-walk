@@ -300,8 +300,7 @@ export default function App() {
 
   async function reviewWalker(walkerId: string, decision: 'approved' | 'rejected') {
     if (!supabase) return;
-    const note = decision === 'rejected' ? window.prompt('Walker reject करने का कारण लिखें:') : null;
-    if (decision === 'rejected' && (!note || note.trim().length < 3)) return;
+    if (decision === 'rejected' && !window.confirm('क्या आप इस walker को reject करना चाहते हैं?')) return;
     setOperationsBusy(true); setOperationsMessage('');
     const { data, error: reviewError } = await supabase.functions.invoke('admin-review-walker', {
       body: { walker_id: walkerId, decision },
@@ -309,7 +308,7 @@ export default function App() {
     if (reviewError || data?.error) {
       setOperationsMessage('Walker status update नहीं हुआ: ' + (data?.error || reviewError?.message || 'Unknown error'));
     } else {
-      setOperationsMessage(decision === 'approved' ? 'Walker approve हो गया।' : 'Walker reject हो गया: ' + note);
+      setOperationsMessage(decision === 'approved' ? 'Walker approve हो गया।' : 'Walker reject हो गया.');
     }
     await loadOperations();
     setOperationsBusy(false);
