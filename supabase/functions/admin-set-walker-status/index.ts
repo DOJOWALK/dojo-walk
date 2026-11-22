@@ -13,7 +13,7 @@ function json(body: Record<string, unknown>, status = 200) {
 Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
   if (req.method !== "POST") return json({ error: "Method not allowed" }, 405);
-  const token = req.headers.get("Authorization")?.match(/^Bearer\\s+(.+)$/i)?.[1];
+  const token = req.headers.get("Authorization")?.match(/^Bearer\s+(.+)$/i)?.[1];
   if (!token) return json({ error: "Admin sign-in required" }, 401);
   const url = Deno.env.get("SUPABASE_URL"), anon = Deno.env.get("SUPABASE_ANON_KEY"), service = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
   if (!url || !anon || !service) return json({ error: "Server authentication is not configured" }, 500);
