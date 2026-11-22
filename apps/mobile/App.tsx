@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { StatusBar } from 'expo-status-bar';
 import * as Location from 'expo-location';
 import * as TaskManager from 'expo-task-manager';
+import MapView, { Circle, Polyline } from 'react-native-maps';
 import {
   ActivityIndicator, Image, KeyboardAvoidingView, Linking, Platform, Pressable,
   ScrollView, StyleSheet, Text, TextInput, View,
@@ -634,6 +635,25 @@ export default function App() {
                     </View> : null}
                     {walk.walk_report ? <Text style={styles.dogMeta}>Walker report: {walk.walk_report}</Text> : null}
                     {latest ? <><Text style={styles.dogMeta}>Latest GPS: {latest.latitude.toFixed(5)}, {latest.longitude.toFixed(5)}</Text><Pressable style={styles.textButton} onPress={() => void Linking.openURL(mapUrl)}><Text style={styles.textButtonLabel}>Open latest location in map ↗</Text></Pressable></> : <Text style={styles.dogMeta}>GPS location अभी उपलब्ध नहीं है।</Text>}
+                    {points.length > 0 ? <View style={styles.routeMapWrap}>
+                      <MapView
+                        key={walk.id + '-' + points.length}
+                        style={styles.routeMap}
+                        initialRegion={{
+                          latitude: (Math.min(...points.map((point) => point.latitude)) + Math.max(...points.map((point) => point.latitude))) / 2,
+                          longitude: (Math.min(...points.map((point) => point.longitude)) + Math.max(...points.map((point) => point.longitude))) / 2,
+                          latitudeDelta: Math.max(0.003, (Math.max(...points.map((point) => point.latitude)) - Math.min(...points.map((point) => point.latitude))) * 1.6),
+                          longitudeDelta: Math.max(0.003, (Math.max(...points.map((point) => point.longitude)) - Math.min(...points.map((point) => point.longitude))) * 1.6),
+                        }}
+                        scrollEnabled
+                        zoomEnabled
+                      >
+                        {points.length > 1 ? <Polyline coordinates={points.map((point) => ({ latitude: point.latitude, longitude: point.longitude }))} strokeColor="#F07824" strokeWidth={5} /> : null}
+                        <Circle center={{ latitude: first.latitude, longitude: first.longitude }} radius={12} fillColor="#237343" strokeColor="#FFFFFF" strokeWidth={2} />
+                        {latest && latest.id !== first.id ? <Circle center={{ latitude: latest.latitude, longitude: latest.longitude }} radius={12} fillColor="#F07824" strokeColor="#FFFFFF" strokeWidth={2} /> : null}
+                      </MapView>
+                      <Text style={styles.routeMapCaption}>हरा = शुरुआत · नारंगी = latest location · {points.length} GPS points</Text>
+                    </View> : null}
                     {first && latest && points.length > 1 ? <Text style={styles.dogMeta}>Route range: {first.latitude.toFixed(5)}, {first.longitude.toFixed(5)} → {latest.latitude.toFixed(5)}, {latest.longitude.toFixed(5)}</Text> : null}
                   </View>
                 </View>;
@@ -735,6 +755,9 @@ const styles = StyleSheet.create({
   smallPrimary: { backgroundColor: '#F07824', paddingHorizontal: 12, paddingVertical: 9, borderRadius: 9 },
   smallPrimaryText: { color: '#fff', fontSize: 11, fontWeight: '800' },
   dogCard: { flexDirection: 'row', alignItems: 'center', gap: 13, backgroundColor: '#fff', padding: 15, borderRadius: 15, borderWidth: 1, borderColor: '#F0E7E0', marginBottom: 10 },
+  routeMapWrap: { marginTop: 12, borderRadius: 12, overflow: 'hidden', borderWidth: 1, borderColor: '#F0E7E0' },
+  routeMap: { width: '100%', height: 220 },
+  routeMapCaption: { color: '#888', fontSize: 9, padding: 8, backgroundColor: '#fff' },
   dogAvatar: { width: 44, height: 44, borderRadius: 14, backgroundColor: '#FFF0E4', alignItems: 'center', justifyContent: 'center' },
   dogAvatarText: { color: '#C55D1B', fontSize: 19, fontWeight: '900' },
   dogName: { color: '#242424', fontSize: 15, fontWeight: '800' },
