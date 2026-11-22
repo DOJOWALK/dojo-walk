@@ -356,8 +356,10 @@ export default function App() {
       uploaded_by: authData.user.id,
     });
     if (metadataError) {
-      await supabase.storage.from('walker-private-documents').remove([objectPath]);
-      setOperationsMessage('Document record save नहीं हुआ; uploaded file हटाने की कोशिश की गई: ' + metadataError.message);
+      const { error: cleanupError } = await supabase.storage.from('walker-private-documents').remove([objectPath]);
+      setOperationsMessage(cleanupError
+        ? 'Document record save नहीं हुआ और uploaded file cleanup भी confirm नहीं हुआ। Admin support की जरूरत है: ' + cleanupError.message
+        : 'Document record save नहीं हुआ; uploaded file हटा दी गई। कारण: ' + metadataError.message);
     } else {
       setOperationsMessage('Private document सुरक्षित bucket में upload हो गया।');
       await loadOperations();
