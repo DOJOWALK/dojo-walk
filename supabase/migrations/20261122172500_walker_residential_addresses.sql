@@ -1,14 +1,30 @@
-alter table public.walkers
-  add column if not exists local_address text,
-  add column if not exists permanent_address text;
+create table if not exists public.walker_private_details (
+  walker_id uuid primary key references public.walkers(id) on delete cascade,
+  local_address text not null check (char_length(local_address) between 5 and 500),
+  permanent_address text not null check (char_length(permanent_address) between 5 and 500),
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
 
-alter table public.walkers
-  add constraint walkers_local_address_length_check
-    check (local_address is null or char_length(local_address) between 5 and 500),
-  add constraint walkers_permanent_address_length_check
-    check (permanent_address is null or char_length(permanent_address) between 5 and 500);
+alter table public.walker_private_details enable row level security;
 
-comment on column public.walkers.local_address is
-  'Walker current/local residential address; visible only through Admin-authorized access.';
-comment on column public.walkers.permanent_address is
-  'Walker permanent residential address; visible only through Admin-authorized access.';
+drop policy if exists "Admins manage walker private details" on public.walker_private_details;
+create policy "Admins manage walker private details"
+on public.walker_private_details
+for all
+to authenticated
+using (
+  exists (
+    select 1 from public.profiles p
+    where p.id = (select auth.uid()) and p.role = 'admin'
+  )
+)
+with check (
+  exists (
+    select 1 from public.profiles p
+    where p.id = (select auth.uid()) and p.role = 'admin'
+  )
+);
+
+comment on table public.walker_private_details is
+  'Private Walker residential details. RLS permits Admins only; never expose this table in Walker app.';
