@@ -6,10 +6,10 @@ const corsHeaders = {
   "Access-Control-Allow-Methods": "POST, OPTIONS",
 };
 
-function json(body: Record<string, unknown>, status = 200, extraHeaders: Record<string, string> = {}) {
+function json(body: Record<string, unknown>, status = 200) {
   return new Response(JSON.stringify(body), {
     status,
-    headers: { ...corsHeaders, "Content-Type": "application/json", ...extraHeaders },
+    headers: { ...corsHeaders, "Content-Type": "application/json" },
   });
 }
 
@@ -47,15 +47,14 @@ Deno.serve(async (req: Request) => {
     "consume_login_phone_attempt",
     { p_client_ip: clientIp },
   );
-  if (rateLimitError || allowedAttempt !== true) {
-    if (rateLimitError) {
-      // Fail closed: never perform the phone lookup if rate limiting is unavailable.
-      return json({ error: "Login check is temporarily unavailable" }, 503);
-    }
+  if (rateLimitError) {
+    // Fail closed: never perform the phone lookup if rate limiting is unavailable.
+    return json({ error: "Login check is temporarily unavailable" }, 503);
+  }
+  if (allowedAttempt !== true) {
     return json(
       { allowed: false, error: "Too many attempts. Please try again later." },
       429,
-      { "Retry-After": "900" },
     );
   }
 
@@ -70,7 +69,7 @@ Deno.serve(async (req: Request) => {
   }
 
   const phone = (body as Record<string, unknown>).phone;
-  if (typeof phone !== "string" || !/^\\+91[6-9]\\d{9}$/.test(phone)) {
+  if (typeof phone !== "string" || /^\+91[6-9]\d{9}$/.test(phone) === false) {
     return json({ allowed: false });
   }
 
