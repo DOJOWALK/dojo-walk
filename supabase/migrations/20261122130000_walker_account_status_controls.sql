@@ -6,12 +6,7 @@ alter table public.walkers
   add constraint walkers_account_status_check
   check (account_status in ('active', 'on_hold', 'suspended', 'deactivated'));
 
--- Keep the legacy review field compatible with existing assignment/reporting code.
--- Admin-created accounts are immediately eligible; operational controls use account_status.
-update public.walkers
-set verification_status = 'approved',
-    approved_at = coalesce(approved_at, created_at)
-where verification_status = 'pending';
+-- Existing legacy review values are left unchanged; new Admin-created accounts are marked approved by the creation function.
 
 create or replace function public.walker_start_booking(p_booking_id uuid)
 returns timestamptz
