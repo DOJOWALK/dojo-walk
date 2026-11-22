@@ -20,7 +20,7 @@ Deno.serve(async (req: Request) => {
   try { body = await req.json(); } catch { return json({ error: "Invalid request" }, 400); }
   if (!body || typeof body !== "object" || Array.isArray(body)) return json({ error: "Invalid request" }, 400);
   const phone = (body as Record<string, unknown>).phone;
-  if (typeof phone !== "string" || !/^\\+91[6-9]\\d{9}$/.test(phone)) return json({ allowed: false });
+  if (typeof phone !== "string" || !/^\+91[6-9]\d{9}$/.test(phone)) return json({ allowed: false });
   const admin = createClient(url, service, { auth: { persistSession: false, autoRefreshToken: false } });
   const { data, error } = await admin.from("profiles").select("id,role").eq("phone", phone).maybeSingle();
   if (error) return json({ error: "Could not check registered mobile number" }, 500);
