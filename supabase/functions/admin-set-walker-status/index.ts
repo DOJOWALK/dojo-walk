@@ -32,9 +32,10 @@ Deno.serve(async (req: Request) => {
   const status = input.account_status;
   if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(walkerId)) return json({ error: "Valid walker id is required" }, 400);
   if (!["active", "on_hold", "suspended", "deactivated"].includes(String(status))) return json({ error: "Invalid account status" }, 400);
-  const { data: walker, error: walkerError } = await db.from("walkers").select("id").eq("id", walkerId).maybeSingle();
+  const { data: walker, error: walkerError } = await db.from("walkers").select("id,account_status").eq("id", walkerId).maybeSingle();
   if (walkerError) return json({ error: "Could not verify walker account" }, 500);
   if (!walker) return json({ error: "Walker account not found" }, 404);
+  if (walker.account_status === "deactivated" && status !== "deactivated") return json({ error: "Deactivated Walker accounts cannot be reactivated. Create a new account if needed." }, 409);
   if (status !== "active") {
     const { count, error: activeWalkError } = await db.from("bookings")
       .select("id", { count: "exact", head: true })
