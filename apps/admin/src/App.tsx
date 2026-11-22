@@ -270,12 +270,12 @@ export default function App() {
 
   async function createWalkerAccount() {
     if (!supabase) return;
-    const phoneDigits = walkerPhone.replace(/[\\s()-]/g, '');
+    const phoneDigits = walkerPhone.replace(/[\s()-]/g, '');
     const phone = phoneDigits.startsWith('+91') ? phoneDigits : '+91' + phoneDigits.replace(/^0/, '');
     const experience = Number(walkerExperience);
     const areas = walkerAreas.split(',').map((area) => area.trim()).filter(Boolean);
     if (walkerName.trim().length < 2) { setOperationsMessage('Walker का पूरा नाम डालें।'); return; }
-    if (!/^\\+91[6-9]\\d{9}$/.test(phone)) { setOperationsMessage('सही 10 अंकों का Indian mobile number डालें।'); return; }
+    if (!/^\+91[6-9]\d{9}$/.test(phone)) { setOperationsMessage('सही 10 अंकों का Indian mobile number डालें।'); return; }
     if (!Number.isFinite(experience) || experience < 0 || experience > 60) { setOperationsMessage('Experience 0 से 60 साल के बीच डालें।'); return; }
     if (!areas.length) { setOperationsMessage('कम से कम एक service area डालें।'); return; }
     setOperationsBusy(true); setOperationsMessage('');
