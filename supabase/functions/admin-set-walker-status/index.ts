@@ -35,6 +35,14 @@ Deno.serve(async (req: Request) => {
   const { data: walker, error: walkerError } = await db.from("walkers").select("id").eq("id", walkerId).maybeSingle();
   if (walkerError) return json({ error: "Could not verify walker account" }, 500);
   if (!walker) return json({ error: "Walker account not found" }, 404);
+  if (status !== "active") {
+    const { count, error: activeWalkError } = await db.from("bookings")
+      .select("id", { count: "exact", head: true })
+      .eq("walker_id", walkerId)
+      .eq("status", "in_progress");
+    if (activeWalkError) return json({ error: "Could not check the Walker's active walk" }, 500);
+    if ((count ?? 0) > 0) return json({ error: "पहले Walker की चल रही walk पूरी करवाएँ, फिर account hold या बंद करें।" }, 409);
+  }
   const { error: updateError } = await db.from("walkers").update({ account_status: status, status_changed_at: new Date().toISOString() }).eq("id", walkerId);
   if (updateError) return json({ error: "Walker status could not be updated" }, 500);
   return json({ walker_id: walkerId, account_status: status });
