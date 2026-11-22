@@ -94,6 +94,11 @@ export default function App() {
   const [subscriptionScheduleChanges, setSubscriptionScheduleChanges] = useState<SubscriptionScheduleChange[]>([]);
   const [operationsBusy, setOperationsBusy] = useState(false);
   const [operationsMessage, setOperationsMessage] = useState('');
+  const [walkerName, setWalkerName] = useState('');
+  const [walkerPhone, setWalkerPhone] = useState('');
+  const [walkerExperience, setWalkerExperience] = useState('0');
+  const [walkerAreas, setWalkerAreas] = useState('Gaur City 1, Gaur City 2');
+  const [walkerBio, setWalkerBio] = useState('');
 
   async function verifyAdmin(userId: string, userEmail?: string) {
     if (!supabase) return;
@@ -262,6 +267,36 @@ export default function App() {
   useEffect(() => {
     if (isAdmin) void loadOperations();
   }, [isAdmin, loadOperations]);
+
+  async function createWalkerAccount() {
+    if (!supabase) return;
+    const phoneDigits = walkerPhone.replace(/[\\s()-]/g, '');
+    const phone = phoneDigits.startsWith('+91') ? phoneDigits : '+91' + phoneDigits.replace(/^0/, '');
+    const experience = Number(walkerExperience);
+    const areas = walkerAreas.split(',').map((area) => area.trim()).filter(Boolean);
+    if (walkerName.trim().length < 2) { setOperationsMessage('Walker का पूरा नाम डालें।'); return; }
+    if (!/^\\+91[6-9]\\d{9}$/.test(phone)) { setOperationsMessage('सही 10 अंकों का Indian mobile number डालें।'); return; }
+    if (!Number.isFinite(experience) || experience < 0 || experience > 60) { setOperationsMessage('Experience 0 से 60 साल के बीच डालें।'); return; }
+    if (!areas.length) { setOperationsMessage('कम से कम एक service area डालें।'); return; }
+    setOperationsBusy(true); setOperationsMessage('');
+    const { data, error: createError } = await supabase.functions.invoke('admin-create-walker', {
+      body: {
+        full_name: walkerName.trim(),
+        phone,
+        experience_years: experience,
+        service_areas: areas,
+        bio: walkerBio.trim(),
+      },
+    });
+    if (createError || data?.error) {
+      setOperationsMessage('Walker account नहीं बना: ' + (data?.error || createError?.message || 'Unknown error'));
+    } else {
+      setWalkerName(''); setWalkerPhone(''); setWalkerExperience('0'); setWalkerBio('');
+      setOperationsMessage('Walker account बन गया। Phone OTP verification और Admin approval के बाद ही वह assignment के लिए eligible होगा।');
+      await loadOperations();
+    }
+    setOperationsBusy(false);
+  }
 
   async function reviewWalker(walkerId: string, decision: 'approved' | 'rejected') {
     if (!supabase) return;
@@ -573,6 +608,16 @@ export default function App() {
         </section>
         <section className="panel route-panel" id="walkers">
           <div className="panel-heading"><div><h3>Walker management</h3><p>New walker accounts stay pending until Admin approval.</p></div><button className="refresh" onClick={() => void loadOperations()} disabled={operationsBusy}>Refresh</button></div>
+          <div className="credit-form">
+            <h4>Create walker account</h4>
+            <p className="muted">Admin account बनाएगा। Walker अपने mobile पर OTP verify करेगा; approval से पहले उसे walk assign नहीं होगी।</p>
+            <label>Walker full name<input value={walkerName} onChange={(event) => setWalkerName(event.target.value)} placeholder="Full name" maxLength={100} /></label>
+            <label>Indian mobile number<input value={walkerPhone} onChange={(event) => setWalkerPhone(event.target.value)} placeholder="9876543210" inputMode="tel" maxLength={14} /></label>
+            <label>Experience (years)<input type="number" min="0" max="60" step="0.5" value={walkerExperience} onChange={(event) => setWalkerExperience(event.target.value)} /></label>
+            <label>Service areas (comma separated)<input value={walkerAreas} onChange={(event) => setWalkerAreas(event.target.value)} placeholder="Gaur City 1, Gaur City 2" maxLength={500} /></label>
+            <label>Short bio (optional)<input value={walkerBio} onChange={(event) => setWalkerBio(event.target.value)} placeholder="Experience with dogs…" maxLength={1000} /></label>
+            <button className="refresh approve" disabled={operationsBusy} onClick={() => void createWalkerAccount()}>{operationsBusy ? 'Please wait…' : 'Create walker account'}</button>
+          </div>
           {walkersAdmin.length === 0 ? <p className="empty">अभी कोई walker account नहीं है।</p> : <div className="table-wrap"><table><thead><tr><th>Walker</th><th>Phone</th><th>Experience</th><th>Status</th><th>Action</th></tr></thead><tbody>{walkersAdmin.map((walker) => <tr key={walker.id}><td>{walker.profile?.full_name || walker.id.slice(0, 8)}</td><td>{walker.profile?.phone || '—'}</td><td>{walker.experience_years} years</td><td><span className={'pill ' + walker.verification_status}>{walker.verification_status}</span></td><td>{walker.verification_status === 'pending' ? <div className="payment-actions"><button className="refresh approve" disabled={operationsBusy} onClick={() => void reviewWalker(walker.id, 'approved')}>Approve</button><button className="refresh reject" disabled={operationsBusy} onClick={() => void reviewWalker(walker.id, 'rejected')}>Reject</button></div> : walker.verification_status === 'approved' ? <span className="subtle-count">Eligible for assignment</span> : '—'}</td></tr>)}</tbody></table></div>}
         </section>
         <section className="panel route-panel" id="weekly-schedule-requests">
