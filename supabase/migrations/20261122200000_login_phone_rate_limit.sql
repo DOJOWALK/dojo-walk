@@ -1,5 +1,5 @@
 -- Server-side rate limiting for the public phone-eligibility endpoint.
--- IP addresses are retained only for the active window plus one day for cleanup.
+-- IP addresses are rate-limit keys; stale rows are pruned on later endpoint calls.
 create table if not exists private.login_phone_rate_limits (
   client_ip inet primary key,
   window_started_at timestamptz not null,
