@@ -53,7 +53,9 @@ begin
     raise exception 'New customer profile could not be promoted to Walker';
   end if;
 end;
-$$;
+$;
+
+alter function public.admin_prepare_walker_profile(uuid, uuid, text, text) owner to postgres;
 
 revoke all on function public.admin_prepare_walker_profile(uuid, uuid, text, text)
   from public, anon, authenticated;
