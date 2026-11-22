@@ -84,11 +84,12 @@ Deno.serve(async (req: Request) => {
   }
 
   const walkerId = created.user.id;
-  const { error: updateProfileError } = await adminClient.from("profiles").update({
-    role: "walker",
-    full_name: fullName,
-    phone,
-  }).eq("id", walkerId);
+  const { error: updateProfileError } = await adminClient.rpc("admin_prepare_walker_profile", {
+    p_admin_id: authData.user.id,
+    p_walker_id: walkerId,
+    p_full_name: fullName,
+    p_phone: phone,
+  });
 
   if (updateProfileError) {
     const { error: cleanupError } = await adminClient.auth.admin.deleteUser(walkerId);
