@@ -65,6 +65,7 @@ export default function App() {
   const [otp, setOtp] = useState('');
   const [otpSent, setOtpSent] = useState(false);
   const [profile, setProfile] = useState<Profile | null>(null);
+  const [walkerAccountStatus, setWalkerAccountStatus] = useState('active');
   const [userId, setUserId] = useState('');
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState('');
@@ -120,6 +121,15 @@ export default function App() {
     }
     setUserId(id);
     setProfile(data as Profile);
+    if (data.role === 'walker') {
+      const { data: walkerRow, error: walkerStatusError } = await supabase.from('walkers').select('account_status').eq('id', id).maybeSingle();
+      if (walkerStatusError || !walkerRow) {
+        setWalkerAccountStatus('deactivated');
+        setError('Walker account status नहीं मिल पाया। Admin से संपर्क करें।');
+      } else {
+        setWalkerAccountStatus(walkerRow.account_status || 'active');
+      }
+    } else setWalkerAccountStatus('active');
     setPhoneInput(''); setOtp(''); setOtpSent(false); setError('');
   }
 
@@ -183,6 +193,7 @@ export default function App() {
 
   const loadWalkerData = useCallback(async () => {
     if (!supabase || !userId || profile?.role !== 'walker') return;
+    if (walkerAccountStatus !== 'active') { setAssignedWalks([]); setLoadingData(false); return; }
     setLoadingData(true); setError('');
     const { data, error: queryError } = await supabase.from('bookings')
       .select('id, scheduled_at, duration_minutes, service_address, customer_notes, status, actual_started_at, actual_ended_at, actual_duration_minutes, walk_report, dog:dogs(name, breed)')
@@ -190,7 +201,7 @@ export default function App() {
     if (queryError) setError('Assigned walks load नहीं हुए: ' + queryError.message);
     else setAssignedWalks((data ?? []) as unknown as AssignedWalk[]);
     setLoadingData(false);
-  }, [userId, profile?.role]);
+  }, [userId, profile?.role, walkerAccountStatus]);
 
   useEffect(() => {
     if (!supabase) return;
@@ -215,7 +226,7 @@ export default function App() {
       .subscribe();
     return () => { void supabase?.removeChannel(channel); };
   }, [profile?.role, userId, loadCustomerWalks]);
-  useEffect(() => { if (profile?.role === 'walker' && userId) void loadWalkerData(); }, [profile?.role, userId, loadWalkerData]);
+  useEffect(() => { if (profile?.role === 'walker' && userId) void loadWalkerData(); }, [profile?.role, userId, walkerAccountStatus, loadWalkerData]);
 
 
 
