@@ -111,6 +111,7 @@ export default function App() {
 
   async function loadProfile(id: string) {
     if (!supabase) return;
+    setError('');
     const { data, error: profileError } = await supabase.from('profiles')
       .select('role, full_name, phone').eq('id', id).maybeSingle();
     if (profileError || !data) {
@@ -130,7 +131,7 @@ export default function App() {
         setWalkerAccountStatus(walkerRow.account_status || 'active');
       }
     } else setWalkerAccountStatus('active');
-    setPhoneInput(''); setOtp(''); setOtpSent(false); setError('');
+    setPhoneInput(''); setOtp(''); setOtpSent(false);
   }
 
   const loadCustomerData = useCallback(async () => {
