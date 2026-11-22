@@ -315,6 +315,11 @@ export default function App() {
       return;
     }
     const extension = file.type === 'image/jpeg' ? 'jpg' : file.type === 'image/png' ? 'png' : file.type === 'image/webp' ? 'webp' : 'pdf';
+    const { data: authData, error: authError } = await supabase.auth.getUser();
+    if (authError || !authData.user?.id) {
+      setOperationsMessage('Admin session verify नहीं हुआ। दोबारा login करें।');
+      return;
+    }
     const objectPath = walkerId + '/' + documentType + '-' + crypto.randomUUID() + '.' + extension;
     setOperationsBusy(true);
     setOperationsMessage('Private document upload हो रहा है…');
@@ -333,7 +338,7 @@ export default function App() {
       object_path: objectPath,
       mime_type: file.type,
       file_size_bytes: file.size,
-      uploaded_by: (await supabase.auth.getUser()).data.user?.id,
+      uploaded_by: authData.user.id,
     });
     if (metadataError) {
       await supabase.storage.from('walker-private-documents').remove([objectPath]);
