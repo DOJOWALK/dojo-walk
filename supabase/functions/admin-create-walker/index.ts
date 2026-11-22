@@ -17,8 +17,12 @@ function json(body: Record<string, unknown>, status = 200) {
 async function cleanupWalkerAccount(adminClient: ReturnType<typeof createClient>, walkerId: string) {
   // profiles.id references auth.users(id) with ON DELETE CASCADE; deleting the Auth user
   // also removes its profile and cascaded Walker/private-detail rows.
-  const { error } = await adminClient.auth.admin.deleteUser(walkerId);
-  return !error;
+  try {
+    const { error } = await adminClient.auth.admin.deleteUser(walkerId);
+    return !error;
+  } catch {
+    return false;
+  }
 }
 Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
@@ -102,8 +106,8 @@ Deno.serve(async (req: Request) => {
     const cleanupSucceeded = await cleanupWalkerAccount(adminClient, walkerId);
     return json({
       error: cleanupSucceeded
-        ? "Walker profile could not be prepared and automatic cleanup could not be confirmed; contact an administrator"
-        : "Walker profile could not be prepared; account creation was rolled back",
+        ? "Walker profile could not be prepared; account creation was rolled back"
+        : "Walker profile could not be prepared and automatic cleanup could not be confirmed; contact an administrator",
     }, 500);
   }
 
@@ -120,8 +124,8 @@ Deno.serve(async (req: Request) => {
     const cleanupSucceeded = await cleanupWalkerAccount(adminClient, walkerId);
     return json({
       error: cleanupSucceeded
-        ? "Walker record could not be created and automatic cleanup could not be confirmed; contact an administrator"
-        : "Walker record could not be created; account creation was rolled back",
+        ? "Walker record could not be created; account creation was rolled back"
+        : "Walker record could not be created and automatic cleanup could not be confirmed; contact an administrator",
     }, 500);
   }
 
@@ -135,8 +139,8 @@ Deno.serve(async (req: Request) => {
     const cleanupSucceeded = await cleanupWalkerAccount(adminClient, walkerId);
     return json({
       error: cleanupSucceeded
-        ? "Walker private details could not be saved and automatic cleanup could not be confirmed; contact an administrator"
-        : "Walker private details could not be saved; account creation was rolled back",
+        ? "Walker private details could not be saved; account creation was rolled back"
+        : "Walker private details could not be saved and automatic cleanup could not be confirmed; contact an administrator",
     }, 500);
   }
 
