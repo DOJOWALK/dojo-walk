@@ -4,6 +4,7 @@ import { isSupabaseConfigured, supabase } from './lib/supabase';
 type AdminProfile = { role: string };
 type WalkerAdmin = { id: string; service_areas: string[]; experience_years: number; verification_status: string; account_status: string; profile: { full_name: string | null; phone: string | null } | null };
 type WalkerDocumentType = 'profile_selfie' | 'aadhaar_front' | 'aadhaar_back' | 'pan_card';
+type WalkerDocument = { id: string; walker_id: string; document_type: WalkerDocumentType; object_path: string; mime_type: string; file_size_bytes: number; created_at: string };
 type AssignmentBooking = { id: string; scheduled_at: string; duration_minutes: number; service_address: string; service_slot: string | null; service_latitude: number | null; service_longitude: number | null; status: string; walker_id: string | null; dog: { name: string } | null; customer: { full_name: string | null; phone: string | null } | null };
 type PricingRow = { id: string; duration_minutes: number; price_inr: number; is_active: boolean };
 type AdminCustomer = { id: string; full_name: string | null; phone: string | null; dogs: { id: string; name: string; breed: string | null; age_years: number | null; service_address: string | null; service_latitude: number | null; service_longitude: number | null }[] };
@@ -85,6 +86,7 @@ export default function App() {
   const [creditBusy, setCreditBusy] = useState(false);
   const [creditMessage, setCreditMessage] = useState('');
   const [walkersAdmin, setWalkersAdmin] = useState<WalkerAdmin[]>([]);
+  const [walkerDocuments, setWalkerDocuments] = useState<WalkerDocument[]>([]);
   const [assignmentBookings, setAssignmentBookings] = useState<AssignmentBooking[]>([]);
   const [pricingRows, setPricingRows] = useState<PricingRow[]>([]);
   const [walkerSelections, setWalkerSelections] = useState<Record<string, string>>({});
@@ -229,7 +231,7 @@ export default function App() {
   const loadOperations = useCallback(async () => {
     if (!supabase) return;
     setOperationsBusy(true);
-    const [walkerResult, bookingResult, pricingResult, payoutResult, customerResult, changeRequestResult, scheduleChangeResult] = await Promise.all([
+    const [walkerResult, bookingResult, pricingResult, payoutResult, customerResult, changeRequestResult, scheduleChangeResult, documentResult] = await Promise.all([
       supabase.from('walkers')
         .select('id,service_areas,experience_years,verification_status,account_status,profile:profiles!walkers_id_fkey(full_name,phone)')
         .order('created_at', { ascending: false }),
@@ -249,11 +251,13 @@ export default function App() {
       supabase.from('subscription_schedule_change_requests')
         .select('id,subscription_id,proposed_morning_time,proposed_evening_time,proposed_service_address,proposed_latitude,proposed_longitude,customer_note,status,admin_note,created_at,dog:dogs(name),customer:profiles!subscription_schedule_change_requests_customer_id_fkey(full_name,phone),schedule:subscription_walk_schedules!subscription_schedule_change_requests_schedule_id_fkey(morning_time,evening_time,service_address)')
         .eq('status', 'pending').order('created_at', { ascending: true }).limit(100),
+      supabase.from('walker_documents').select('id,walker_id,document_type,object_path,mime_type,file_size_bytes,created_at').order('created_at', { ascending: false }),
     ]);
-    const failed = walkerResult.error || bookingResult.error || pricingResult.error || payoutResult.error || customerResult.error || changeRequestResult.error || scheduleChangeResult.error;
+    const failed = walkerResult.error || bookingResult.error || pricingResult.error || payoutResult.error || customerResult.error || changeRequestResult.error || scheduleChangeResult.error || documentResult.error;
     if (failed) setOperationsMessage('Management data load नहीं हुआ: ' + failed.message);
     else {
       setWalkersAdmin((walkerResult.data ?? []) as unknown as WalkerAdmin[]);
+      setWalkerDocuments((documentResult.data ?? []) as WalkerDocument[]);
       setAssignmentBookings((bookingResult.data ?? []) as unknown as AssignmentBooking[]);
       const rows = (pricingResult.data ?? []) as PricingRow[];
       setPricingRows(rows);
@@ -346,6 +350,30 @@ export default function App() {
     } else {
       setOperationsMessage('Private document सुरक्षित bucket में upload हो गया।');
     }
+    setOperationsBusy(false);
+  }
+
+  async function openWalkerDocument(document: WalkerDocument) {
+    if (!supabase) return;
+    const { data, error: urlError } = await supabase.storage.from('walker-private-documents').createSignedUrl(document.object_path, 60);
+    if (urlError || !data?.signedUrl) { setOperationsMessage('Document open नहीं हुआ: ' + (urlError?.message || 'Signed URL unavailable')); return; }
+    window.open(data.signedUrl, '_blank', 'noopener,noreferrer');
+  }
+
+  async function deleteWalkerDocument(document: WalkerDocument) {
+    if (!supabase) return;
+    const label = document.document_type.replaceAll('_', ' ');
+    if (!window.confirm('इस Walker का ' + label + ' document permanently delete करना है? यह action वापस नहीं होगा।')) return;
+    setOperationsBusy(true); setOperationsMessage('');
+    const { error: storageError } = await supabase.storage.from('walker-private-documents').remove([document.object_path]);
+    if (storageError) {
+      setOperationsMessage('File delete नहीं हुई; metadata सुरक्षित रखा गया: ' + storageError.message);
+      setOperationsBusy(false);
+      return;
+    }
+    const { error: metadataError } = await supabase.from('walker_documents').delete().eq('id', document.id);
+    if (metadataError) setOperationsMessage('File हट गई लेकिन metadata delete नहीं हुआ; Admin support की जरूरत है: ' + metadataError.message);
+    else { setOperationsMessage('Document permanently delete हो गया।'); await loadOperations(); }
     setOperationsBusy(false);
   }
 
@@ -674,7 +702,7 @@ export default function App() {
             <label>Short bio (optional)<input value={walkerBio} onChange={(event) => setWalkerBio(event.target.value)} placeholder="Experience with dogs…" maxLength={1000} /></label>
             <button className="refresh approve" disabled={operationsBusy} onClick={() => void createWalkerAccount()}>{operationsBusy ? 'Please wait…' : 'Create walker account'}</button>
           </div>
-          {walkersAdmin.length === 0 ? <p className="empty">अभी कोई walker account नहीं है।</p> : <div className="table-wrap"><table><thead><tr><th>Walker</th><th>Phone</th><th>Experience</th><th>Account Status</th><th>Private documents (max 5 MB each)</th><th>Action</th></tr></thead><tbody>{walkersAdmin.map((walker) => <tr key={walker.id}><td>{walker.profile?.full_name || walker.id.slice(0, 8)}</td><td>{walker.profile?.phone || '—'}</td><td>{walker.experience_years} years</td><td><span className={'pill ' + walker.account_status}>{walker.account_status.replace('_', ' ')}</span></td><td><div className="document-upload-list"><label>Selfie<input type="file" accept="image/jpeg,image/png,image/webp" disabled={operationsBusy} onChange={(event) => { void uploadWalkerDocument(walker.id, 'profile_selfie', event.target.files?.[0]); event.currentTarget.value = ''; }} /></label><label>Aadhaar front<input type="file" accept="image/jpeg,image/png,image/webp,application/pdf" disabled={operationsBusy} onChange={(event) => { void uploadWalkerDocument(walker.id, 'aadhaar_front', event.target.files?.[0]); event.currentTarget.value = ''; }} /></label><label>Aadhaar back<input type="file" accept="image/jpeg,image/png,image/webp,application/pdf" disabled={operationsBusy} onChange={(event) => { void uploadWalkerDocument(walker.id, 'aadhaar_back', event.target.files?.[0]); event.currentTarget.value = ''; }} /></label><label>PAN card<input type="file" accept="image/jpeg,image/png,image/webp,application/pdf" disabled={operationsBusy} onChange={(event) => { void uploadWalkerDocument(walker.id, 'pan_card', event.target.files?.[0]); event.currentTarget.value = ''; }} /></label></div><div className="payment-actions">{walker.account_status === 'active' ? <><button className="refresh" disabled={operationsBusy} onClick={() => void updateWalkerAccountStatus(walker.id, 'on_hold')}>Hold</button><button className="refresh reject" disabled={operationsBusy} onClick={() => void updateWalkerAccountStatus(walker.id, 'suspended')}>Suspend</button><button className="refresh reject" disabled={operationsBusy} onClick={() => void updateWalkerAccountStatus(walker.id, 'deactivated')}>Deactivate</button></> : walker.account_status === 'deactivated' ? <span className="subtle-count">Closed</span> : <><button className="refresh approve" disabled={operationsBusy} onClick={() => void updateWalkerAccountStatus(walker.id, 'active')}>Reactivate</button><button className="refresh reject" disabled={operationsBusy} onClick={() => void updateWalkerAccountStatus(walker.id, 'deactivated')}>Deactivate</button></>}</div></td></tr>)}</tbody></table></div>}
+          {walkersAdmin.length === 0 ? <p className="empty">अभी कोई walker account नहीं है।</p> : <div className="table-wrap"><table><thead><tr><th>Walker</th><th>Phone</th><th>Experience</th><th>Account Status</th><th>Private documents (max 5 MB each)</th><th>Action</th></tr></thead><tbody>{walkersAdmin.map((walker) => <tr key={walker.id}><td>{walker.profile?.full_name || walker.id.slice(0, 8)}</td><td>{walker.profile?.phone || '—'}</td><td>{walker.experience_years} years</td><td><span className={'pill ' + walker.account_status}>{walker.account_status.replace('_', ' ')}</span></td><td><div className="document-upload-list"><label>Selfie<input type="file" accept="image/jpeg,image/png,image/webp" disabled={operationsBusy} onChange={(event) => { void uploadWalkerDocument(walker.id, 'profile_selfie', event.target.files?.[0]); event.currentTarget.value = ''; }} /></label><label>Aadhaar front<input type="file" accept="image/jpeg,image/png,image/webp,application/pdf" disabled={operationsBusy} onChange={(event) => { void uploadWalkerDocument(walker.id, 'aadhaar_front', event.target.files?.[0]); event.currentTarget.value = ''; }} /></label><label>Aadhaar back<input type="file" accept="image/jpeg,image/png,image/webp,application/pdf" disabled={operationsBusy} onChange={(event) => { void uploadWalkerDocument(walker.id, 'aadhaar_back', event.target.files?.[0]); event.currentTarget.value = ''; }} /></label><label>PAN card<input type="file" accept="image/jpeg,image/png,image/webp,application/pdf" disabled={operationsBusy} onChange={(event) => { void uploadWalkerDocument(walker.id, 'pan_card', event.target.files?.[0]); event.currentTarget.value = ''; }} /></label></div><div className="walker-document-list">{walkerDocuments.filter((document) => document.walker_id === walker.id).map((document) => <div className="walker-document-row" key={document.id}><span>{document.document_type.replaceAll('_', ' ')} · {(document.file_size_bytes / 1024).toFixed(0)} KB · {dateTime(document.created_at)}</span><button type="button" className="refresh" disabled={operationsBusy} onClick={() => void openWalkerDocument(document)}>View / download</button><button type="button" className="refresh reject" disabled={operationsBusy} onClick={() => void deleteWalkerDocument(document)}>Delete</button></div>)}{walkerDocuments.every((document) => document.walker_id !== walker.id) ? <small>No documents uploaded yet.</small> : null}</div><div className="payment-actions">{walker.account_status === 'active' ? <><button className="refresh" disabled={operationsBusy} onClick={() => void updateWalkerAccountStatus(walker.id, 'on_hold')}>Hold</button><button className="refresh reject" disabled={operationsBusy} onClick={() => void updateWalkerAccountStatus(walker.id, 'suspended')}>Suspend</button><button className="refresh reject" disabled={operationsBusy} onClick={() => void updateWalkerAccountStatus(walker.id, 'deactivated')}>Deactivate</button></> : walker.account_status === 'deactivated' ? <span className="subtle-count">Closed</span> : <><button className="refresh approve" disabled={operationsBusy} onClick={() => void updateWalkerAccountStatus(walker.id, 'active')}>Reactivate</button><button className="refresh reject" disabled={operationsBusy} onClick={() => void updateWalkerAccountStatus(walker.id, 'deactivated')}>Deactivate</button></>}</div></td></tr>)}</tbody></table></div>}
         </section>
         <section className="panel route-panel" id="weekly-schedule-requests">
           <div className="panel-heading"><div><h3>Weekly schedule change requests</h3><p>Customer ke recurring morning/evening time aur service address changes review karein. Approval se pehle old schedule active rehta hai.</p></div><button className="refresh" onClick={() => void loadOperations()} disabled={operationsBusy}>Refresh</button></div>
