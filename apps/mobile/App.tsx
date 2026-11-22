@@ -236,7 +236,15 @@ export default function App() {
     const normalized = normalizeIndianPhone(phoneInput);
     if (!/^\+91[6-9]\d{9}$/.test(normalized)) { setError('कृपया सही 10 अंकों का Indian mobile number डालें।'); return; }
     setBusy(true); setError(''); setMessage('');
-    const { error: otpError } = await supabase.auth.signInWithOtp({ phone: normalized });
+    const { data: eligibility, error: eligibilityError } = await supabase.functions.invoke('check-login-phone', {
+      body: { phone: normalized },
+    });
+    if (eligibilityError || !eligibility?.allowed) {
+      setError('Invalid Number: यह मोबाइल नंबर DOJO WALK में रजिस्टर्ड नहीं है। Admin से संपर्क करें।');
+      setBusy(false);
+      return;
+    }
+    const { error: otpError } = await supabase.auth.signInWithOtp({ phone: normalized, options: { shouldCreateUser: false } });
     if (otpError) setError('OTP नहीं भेजा जा सका: ' + otpError.message);
     else { setPhone(normalized); setOtpSent(true); setMessage('OTP भेज दिया गया है। SMS में आया 6 अंकों का code डालें।'); }
     setBusy(false);
