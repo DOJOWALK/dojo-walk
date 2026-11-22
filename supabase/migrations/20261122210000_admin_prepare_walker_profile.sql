@@ -27,7 +27,7 @@ begin
     raise exception 'Invalid Walker name';
   end if;
 
-  if p_phone is null or p_phone !~ '^\\+91[6-9][0-9]{9}$' then
+  if p_phone is null or p_phone !~ '^\+91[6-9][0-9]{9}$' then
     raise exception 'Invalid Indian mobile number';
   end if;
 
