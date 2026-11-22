@@ -100,8 +100,6 @@ Deno.serve(async (req: Request) => {
     service_areas: serviceAreas,
     experience_years: experience,
     bio: bio || null,
-    local_address: localAddress,
-    permanent_address: permanentAddress,
     verification_status: "approved",
     approved_at: new Date().toISOString(),
   });
@@ -109,6 +107,17 @@ Deno.serve(async (req: Request) => {
   if (walkerError) {
     await adminClient.auth.admin.deleteUser(walkerId);
     return json({ error: "Walker record could not be created; account creation was rolled back" }, 500);
+  }
+
+  const { error: privateDetailsError } = await adminClient.from("walker_private_details").insert({
+    walker_id: walkerId,
+    local_address: localAddress,
+    permanent_address: permanentAddress,
+  });
+
+  if (privateDetailsError) {
+    await adminClient.auth.admin.deleteUser(walkerId);
+    return json({ error: "Walker private details could not be saved; account creation was rolled back" }, 500);
   }
 
   return json({
