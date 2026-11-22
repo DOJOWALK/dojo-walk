@@ -13,6 +13,17 @@ function json(body: Record<string, unknown>, status = 200) {
   });
 }
 
+
+async function cleanupWalkerAccount(adminClient: ReturnType<typeof createClient>, walkerId: string) {
+  const { error: authDeleteError } = await adminClient.auth.admin.deleteUser(walkerId);
+  if (authDeleteError) return false;
+
+  // The current profiles.id foreign key is self-referential, not auth.users.
+  // Explicitly remove the profile after Auth deletion to avoid an orphaned profile.
+  const { error: profileDeleteError } = await adminClient.from("profiles").delete().eq("id", walkerId);
+  return !profileDeleteError;
+}
+
 Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
   if (req.method !== "POST") return json({ error: "Method not allowed" }, 405);
@@ -92,9 +103,9 @@ Deno.serve(async (req: Request) => {
   });
 
   if (updateProfileError) {
-    const { error: cleanupError } = await adminClient.auth.admin.deleteUser(walkerId);
+    const cleanupSucceeded = await cleanupWalkerAccount(adminClient, walkerId);
     return json({
-      error: cleanupError
+      error: cleanupSucceeded
         ? "Walker profile could not be prepared and automatic cleanup could not be confirmed; contact an administrator"
         : "Walker profile could not be prepared; account creation was rolled back",
     }, 500);
@@ -110,9 +121,9 @@ Deno.serve(async (req: Request) => {
   });
 
   if (walkerError) {
-    const { error: cleanupError } = await adminClient.auth.admin.deleteUser(walkerId);
+    const cleanupSucceeded = await cleanupWalkerAccount(adminClient, walkerId);
     return json({
-      error: cleanupError
+      error: cleanupSucceeded
         ? "Walker record could not be created and automatic cleanup could not be confirmed; contact an administrator"
         : "Walker record could not be created; account creation was rolled back",
     }, 500);
@@ -125,9 +136,9 @@ Deno.serve(async (req: Request) => {
   });
 
   if (privateDetailsError) {
-    const { error: cleanupError } = await adminClient.auth.admin.deleteUser(walkerId);
+    const cleanupSucceeded = await cleanupWalkerAccount(adminClient, walkerId);
     return json({
-      error: cleanupError
+      error: cleanupSucceeded
         ? "Walker private details could not be saved and automatic cleanup could not be confirmed; contact an administrator"
         : "Walker private details could not be saved; account creation was rolled back",
     }, 500);
