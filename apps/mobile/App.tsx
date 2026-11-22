@@ -679,6 +679,7 @@ export default function App() {
               <View style={styles.notice}><Text style={styles.noticeTitle}>Payment verification</Text><Text style={styles.noticeBody}>आपका payment reference Admin verify करेगा। App payment को अपने-आप successful नहीं मानेगा।</Text></View>
               <Pressable style={styles.textButton} onPress={() => void loadCustomerData()}><Text style={styles.textButtonLabel}>↻ Refresh my details</Text></Pressable>
             </> : profile.role === 'walker' ? <>
+              {walkerAccountStatus !== 'active' ? <View style={styles.notice}><Text style={styles.noticeTitle}>Walker Account: {walkerAccountStatus.replace('_', ' ').toUpperCase()}</Text><Text style={styles.noticeBody}>आपका account अभी काम के लिए active नहीं है। कृपया DOJO WALK Admin से संपर्क करें।</Text></View> : <>
               <View style={styles.sectionHeader}><View><Text style={styles.sectionTitle}>मेरी Assigned Walks</Text><Text style={styles.sectionHint}>सिर्फ आपको assign की गई walks दिखाई जाती हैं।</Text></View><Pressable style={styles.smallPrimary} onPress={() => void loadWalkerData()}><Text style={styles.smallPrimaryText}>Refresh</Text></Pressable></View>
               {loadingData ? <ActivityIndicator color="#F07824" style={{ margin: 20 }} /> : assignedWalks.length === 0 ? <View style={styles.empty}><Text style={styles.emptyTitle}>अभी कोई walk assign नहीं हुई</Text><Text style={styles.body}>Admin द्वारा आपको dog और walk assign करने पर वह यहाँ दिखाई देगी।</Text></View> : assignedWalks.map((walk) => <View style={styles.dogCard} key={walk.id}>
                 <View style={styles.dogAvatar}><Text style={styles.dogAvatarText}>{(walk.dog?.name || 'D').slice(0, 1).toUpperCase()}</Text></View>
@@ -698,6 +699,7 @@ export default function App() {
               </View>)}
               {gpsMessage ? <Text style={styles.success}>{gpsMessage}</Text> : null}
               <View style={styles.notice}><Text style={styles.noticeTitle}>GPS tracking</Text><Text style={styles.noticeBody}>Walk active रहने पर GPS points save होते हैं। Background GPS के लिए location permission और native development build जरूरी है; Expo Go में background tracking उपलब्ध नहीं होती।</Text></View>
+              </>}
             </> : <View style={styles.card}>
               <Text style={styles.cardEyebrow}>{roleText.toUpperCase()}</Text>
               <Text style={styles.welcome}>Admin account connected</Text>
