@@ -339,6 +339,7 @@ export default function App() {
     setOperationsMessage('Private document upload हो रहा है…');
     const { error: uploadError } = await supabase.storage.from('walker-private-documents').upload(objectPath, file, {
       contentType: file.type,
+      cacheControl: '60',
       upsert: false,
     });
     if (uploadError) {
@@ -366,9 +367,19 @@ export default function App() {
 
   async function openWalkerDocument(document: WalkerDocument) {
     if (!supabase) return;
+    const preview = window.open('about:blank', '_blank');
+    if (!preview) {
+      setOperationsMessage('Browser ने नया tab block कर दिया। Pop-ups allow करके दोबारा कोशिश करें।');
+      return;
+    }
+    preview.opener = null;
     const { data, error: urlError } = await supabase.storage.from('walker-private-documents').createSignedUrl(document.object_path, 60);
-    if (urlError || !data?.signedUrl) { setOperationsMessage('Document open नहीं हुआ: ' + (urlError?.message || 'Signed URL unavailable')); return; }
-    window.location.assign(data.signedUrl);
+    if (urlError || !data?.signedUrl) {
+      preview.close();
+      setOperationsMessage('Document open नहीं हुआ: ' + (urlError?.message || 'Signed URL unavailable'));
+      return;
+    }
+    preview.location.href = data.signedUrl;
   }
 
   async function deleteWalkerDocument(document: WalkerDocument) {
