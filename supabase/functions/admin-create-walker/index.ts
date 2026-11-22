@@ -15,15 +15,11 @@ function json(body: Record<string, unknown>, status = 200) {
 
 
 async function cleanupWalkerAccount(adminClient: ReturnType<typeof createClient>, walkerId: string) {
-  const { error: authDeleteError } = await adminClient.auth.admin.deleteUser(walkerId);
-  if (authDeleteError) return false;
-
-  // The current profiles.id foreign key is self-referential, not auth.users.
-  // Explicitly remove the profile after Auth deletion to avoid an orphaned profile.
-  const { error: profileDeleteError } = await adminClient.from("profiles").delete().eq("id", walkerId);
-  return !profileDeleteError;
+  // profiles.id references auth.users(id) with ON DELETE CASCADE; deleting the Auth user
+  // also removes its profile and cascaded Walker/private-detail rows.
+  const { error } = await adminClient.auth.admin.deleteUser(walkerId);
+  return !error;
 }
-
 Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
   if (req.method !== "POST") return json({ error: "Method not allowed" }, 405);
