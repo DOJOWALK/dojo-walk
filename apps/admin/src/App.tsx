@@ -303,11 +303,14 @@ export default function App() {
     const note = decision === 'rejected' ? window.prompt('Walker reject करने का कारण लिखें:') : null;
     if (decision === 'rejected' && (!note || note.trim().length < 3)) return;
     setOperationsBusy(true); setOperationsMessage('');
-    const { error: updateError } = await supabase.from('walkers')
-      .update({ verification_status: decision, approved_at: decision === 'approved' ? new Date().toISOString() : null })
-      .eq('id', walkerId);
-    if (updateError) setOperationsMessage('Walker status update नहीं हुआ: ' + updateError.message);
-    else setOperationsMessage(decision === 'approved' ? 'Walker approve हो गया।' : 'Walker reject हो गया: ' + note);
+    const { data, error: reviewError } = await supabase.functions.invoke('admin-review-walker', {
+      body: { walker_id: walkerId, decision },
+    });
+    if (reviewError || data?.error) {
+      setOperationsMessage('Walker status update नहीं हुआ: ' + (data?.error || reviewError?.message || 'Unknown error'));
+    } else {
+      setOperationsMessage(decision === 'approved' ? 'Walker approve हो गया।' : 'Walker reject हो गया: ' + note);
+    }
     await loadOperations();
     setOperationsBusy(false);
   }
