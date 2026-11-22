@@ -99,6 +99,8 @@ export default function App() {
   const [walkerExperience, setWalkerExperience] = useState('0');
   const [walkerAreas, setWalkerAreas] = useState('Gaur City 1, Gaur City 2');
   const [walkerBio, setWalkerBio] = useState('');
+  const [walkerLocalAddress, setWalkerLocalAddress] = useState('');
+  const [walkerPermanentAddress, setWalkerPermanentAddress] = useState('');
 
   async function verifyAdmin(userId: string, userEmail?: string) {
     if (!supabase) return;
@@ -286,12 +288,14 @@ export default function App() {
         experience_years: experience,
         service_areas: areas,
         bio: walkerBio.trim(),
+        local_address: walkerLocalAddress.trim(),
+        permanent_address: walkerPermanentAddress.trim(),
       },
     });
     if (createError || data?.error) {
       setOperationsMessage('Walker account नहीं बना: ' + (data?.error || createError?.message || 'Unknown error'));
     } else {
-      setWalkerName(''); setWalkerPhone(''); setWalkerExperience('0'); setWalkerBio('');
+      setWalkerName(''); setWalkerPhone(''); setWalkerExperience('0'); setWalkerBio(''); setWalkerLocalAddress(''); setWalkerPermanentAddress('');
       setOperationsMessage('Walker account बन गया। Mobile OTP verify होने के बाद वह काम कर सकेगा।');
       await loadOperations();
     }
@@ -618,6 +622,8 @@ export default function App() {
             <label>Indian mobile number<input value={walkerPhone} onChange={(event) => setWalkerPhone(event.target.value)} placeholder="9876543210" inputMode="tel" maxLength={14} /></label>
             <label>Experience (years)<input type="number" min="0" max="60" step="0.5" value={walkerExperience} onChange={(event) => setWalkerExperience(event.target.value)} /></label>
             <label>Service areas (comma separated)<input value={walkerAreas} onChange={(event) => setWalkerAreas(event.target.value)} placeholder="Gaur City 1, Gaur City 2" maxLength={500} /></label>
+            <label>Local address<textarea value={walkerLocalAddress} onChange={(event) => setWalkerLocalAddress(event.target.value)} placeholder="Current/local residential address" maxLength={500} required /></label>
+            <label>Permanent address<textarea value={walkerPermanentAddress} onChange={(event) => setWalkerPermanentAddress(event.target.value)} placeholder="Permanent residential address" maxLength={500} required /></label>
             <label>Short bio (optional)<input value={walkerBio} onChange={(event) => setWalkerBio(event.target.value)} placeholder="Experience with dogs…" maxLength={1000} /></label>
             <button className="refresh approve" disabled={operationsBusy} onClick={() => void createWalkerAccount()}>{operationsBusy ? 'Please wait…' : 'Create walker account'}</button>
           </div>
