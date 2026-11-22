@@ -91,8 +91,12 @@ Deno.serve(async (req: Request) => {
   }).eq("id", walkerId);
 
   if (updateProfileError) {
-    await adminClient.auth.admin.deleteUser(walkerId);
-    return json({ error: "Walker profile could not be prepared; account creation was rolled back" }, 500);
+    const { error: cleanupError } = await adminClient.auth.admin.deleteUser(walkerId);
+    return json({
+      error: cleanupError
+        ? "Walker profile could not be prepared and automatic cleanup could not be confirmed; contact an administrator"
+        : "Walker profile could not be prepared; account creation was rolled back",
+    }, 500);
   }
 
   const { error: walkerError } = await adminClient.from("walkers").insert({
@@ -105,8 +109,12 @@ Deno.serve(async (req: Request) => {
   });
 
   if (walkerError) {
-    await adminClient.auth.admin.deleteUser(walkerId);
-    return json({ error: "Walker record could not be created; account creation was rolled back" }, 500);
+    const { error: cleanupError } = await adminClient.auth.admin.deleteUser(walkerId);
+    return json({
+      error: cleanupError
+        ? "Walker record could not be created and automatic cleanup could not be confirmed; contact an administrator"
+        : "Walker record could not be created; account creation was rolled back",
+    }, 500);
   }
 
   const { error: privateDetailsError } = await adminClient.from("walker_private_details").insert({
@@ -116,8 +124,12 @@ Deno.serve(async (req: Request) => {
   });
 
   if (privateDetailsError) {
-    await adminClient.auth.admin.deleteUser(walkerId);
-    return json({ error: "Walker private details could not be saved; account creation was rolled back" }, 500);
+    const { error: cleanupError } = await adminClient.auth.admin.deleteUser(walkerId);
+    return json({
+      error: cleanupError
+        ? "Walker private details could not be saved and automatic cleanup could not be confirmed; contact an administrator"
+        : "Walker private details could not be saved; account creation was rolled back",
+    }, 500);
   }
 
   return json({
