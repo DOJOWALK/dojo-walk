@@ -26,7 +26,7 @@ DOJO WALK is a dog-walking service platform for customers, walkers, and administ
 - [x] Admin live walk/route-history panel with realtime refresh and latest GPS map links.
 - [x] Embedded GPS route maps with start/end markers and route polylines in customer app and Admin dashboard.
 - [ ] Test realtime route updates and GPS accuracy on physical devices.
-- [ ] Draw full GPS polylines on embedded maps and test realtime on physical devices.
+- [ ] Test embedded OpenStreetMap route polylines, realtime updates, GPS accuracy, and background tracking on physical Android devices.
 - [ ] Admin payment verification, walker assignment, pricing, and payout management.
 - [ ] End-to-end testing and Android/iOS release builds.
 
@@ -68,4 +68,4 @@ Never commit Supabase service-role keys, passwords, OTPs, or other secrets. Clie
 
 ## Embedded route maps
 
-Customer and Admin screens can render recorded GPS points as an embedded route map. Map tiles require an internet connection. The mobile map uses the native map provider (Google Maps on Android and Apple Maps by default on iOS). Android production builds need a restricted Google Maps SDK API key configured in the native build environment; never commit the key. Physical-device route, background GPS, permissions, and map rendering tests are still required before release.
+Customer and Admin screens render recorded GPS points as embedded Leaflet maps using OpenStreetMap tiles. The mobile map is displayed in `react-native-webview`; no Google Maps SDK key is required for these route maps. Map tiles and Leaflet assets require an internet connection. Keep visible OpenStreetMap attribution and follow the public tile service usage policy; use a suitable tile provider for production-scale traffic. Physical-device route, background GPS, permissions, realtime updates, and map rendering tests are still required before release.
