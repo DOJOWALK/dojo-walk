@@ -117,6 +117,7 @@ Deno.serve(async (req: Request) => {
     experience_years: experience,
     bio: bio || null,
     verification_status: "approved",
+    account_status: "active",
     approved_at: new Date().toISOString(),
   });
 
