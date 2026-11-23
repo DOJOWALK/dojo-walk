@@ -1,4 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
+import { CircleMarker, MapContainer, Polyline, TileLayer } from 'react-leaflet';
+import 'leaflet/dist/leaflet.css';
 import { isSupabaseConfigured, supabase } from './lib/supabase';
 
 type AdminProfile = { role: string };
@@ -55,6 +57,35 @@ const statusLabel: Record<string, string> = {
   requested: 'Requested', assigned: 'Assigned', accepted: 'Accepted',
   in_progress: 'In progress', completed: 'Completed', cancelled: 'Cancelled',
 };
+
+function RouteMap({ walk }: { walk: RouteWalk }) {
+  const points = walk.points;
+  if (!points.length) return <div className="route-map-empty">GPS route points अभी उपलब्ध नहीं हैं।</div>;
+  const positions: [number, number][] = points.map((point) => [point.latitude, point.longitude]);
+  const center: [number, number] = [
+    (Math.min(...points.map((point) => point.latitude)) + Math.max(...points.map((point) => point.latitude))) / 2,
+    (Math.min(...points.map((point) => point.longitude)) + Math.max(...points.map((point) => point.longitude))) / 2,
+  ];
+  return (
+    <MapContainer
+      key={walk.id + '-' + points.length}
+      className="route-map"
+      center={center}
+      zoom={16}
+      scrollWheelZoom
+      bounds={positions.length > 1 ? positions : undefined}
+      boundsOptions={{ padding: [24, 24], maxZoom: 17 }}
+    >
+      <TileLayer
+        attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+        url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+      />
+      {positions.length > 1 ? <Polyline positions={positions} pathOptions={{ color: '#F07824', weight: 5, opacity: 0.9 }} /> : null}
+      <CircleMarker center={positions[0]} radius={7} pathOptions={{ color: '#fff', weight: 2, fillColor: '#237343', fillOpacity: 1 }} />
+      {positions.length > 1 ? <CircleMarker center={positions[positions.length - 1]} radius={7} pathOptions={{ color: '#fff', weight: 2, fillColor: '#F07824', fillOpacity: 1 }} /> : null}
+    </MapContainer>
+  );
+}
 
 export default function App() {
   const [email, setEmail] = useState('');
@@ -542,7 +573,8 @@ export default function App() {
             const mapUrl = latest ? 'https://www.openstreetmap.org/?mlat=' + latest.latitude + '&mlon=' + latest.longitude + '#map=17/' + latest.latitude + '/' + latest.longitude : '';
             return <article className="route-row" key={walk.id}>
               <div className="route-info"><strong>{walk.dog?.name || 'Dog walk'} · {walk.status === 'in_progress' ? 'LIVE' : 'Completed'}</strong><small>{walk.actual_started_at ? dateTime(walk.actual_started_at) : dateTime(walk.scheduled_at)}</small><small>{walk.points.length} GPS points · {latest ? 'Last update ' + dateTime(latest.recorded_at) : 'No GPS points yet'}</small>{first && latest ? <small>Start {first.latitude.toFixed(5)}, {first.longitude.toFixed(5)} → Latest {latest.latitude.toFixed(5)}, {latest.longitude.toFixed(5)}</small> : null}</div>
-              {latest ? <a className="map-link" href={mapUrl} target="_blank" rel="noreferrer">Open map ↗</a> : null}
+              {latest ? <a className="map-link" href={mapUrl} target="_blank" rel="noreferrer">Open latest location ↗</a> : null}
+              <RouteMap walk={walk} />
             </article>;
           })}</div>}
         </section>
