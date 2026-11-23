@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { StatusBar } from 'expo-status-bar';
 import * as Location from 'expo-location';
 import * as TaskManager from 'expo-task-manager';
+import { WebView } from 'react-native-webview';
 import {
   ActivityIndicator, Image, KeyboardAvoidingView, Linking, Platform, Pressable,
   ScrollView, StyleSheet, Text, TextInput, View,
@@ -11,6 +12,8 @@ import { isSupabaseConfigured, supabase } from './lib/supabase';
 type Profile = { role: 'customer' | 'walker' | 'admin'; full_name: string | null; phone: string | null };
 type Dog = { id: string; name: string; breed: string | null; age_years: number | null; notes: string | null; service_address: string | null; service_latitude: number | null; service_longitude: number | null };
 type Package = { id: string; walks_per_day: number; duration_minutes: number; monthly_price_inr: number };
+type WalkPrice = { id: string; duration_minutes: number; price_inr: number; is_active: boolean };
+type SundayExtraPayment = { booking_id: string; dog_name: string; scheduled_at: string; duration_minutes: number; amount_inr: number; upi_transaction_ref: string; payment_status: string; submitted_at: string; admin_note: string | null };
 type Subscription = { id: string; dog_id: string; walks_per_day: number; duration_minutes: number; monthly_price_inr: number; starts_on: string; ends_on: string; status: string };
 type CustomerWalk = { id: string; scheduled_at: string; service_address: string; service_slot: string | null; status: string; actual_started_at: string | null; actual_ended_at: string | null; actual_duration_minutes: number | null; walk_report: string | null; dog: { name: string } | null };
 type CustomerChangeRequest = { id: string; booking_id: string; status: string; proposed_scheduled_at: string | null; proposed_service_address: string | null; proposed_service_slot: string | null; admin_note: string | null; created_at: string };
@@ -18,6 +21,28 @@ type WalkSchedule = { id: string; subscription_id: string; dog_id: string; morni
 type ScheduleChangeRequest = { id: string; dog_id: string; status: string; admin_note: string | null; created_at: string };
 type RoutePoint = { id: number; booking_id: string; latitude: number; longitude: number; recorded_at: string };
 type AssignedWalk = { id: string; scheduled_at: string; duration_minutes: number; service_address: string; customer_notes: string | null; status: string; actual_started_at: string | null; actual_ended_at: string | null; actual_duration_minutes: number | null; walk_report: string | null; dog: { name: string; breed: string | null } | null };
+
+function buildRouteMapHtml(points: RoutePoint[]) {
+  const coordinates = JSON.stringify(points.map((point) => [point.latitude, point.longitude])).replace(/</g, '\\u003c');
+  return `<!doctype html>
+<html><head><meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<style>html,body,#map{height:100%;width:100%;margin:0;padding:0} .leaflet-container{background:#f4f1ed}</style>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script></head>
+<body><div id="map"></div><script>
+const points = ${coordinates};
+const map = L.map('map', { zoomControl: true, attributionControl: true });
+L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+  maxZoom: 19,
+  attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+}).addTo(map);
+const bounds = L.latLngBounds(points);
+if (points.length > 1) L.polyline(points, { color: '#F07824', weight: 5, opacity: 0.9 }).addTo(map);
+L.circleMarker(points[0], { radius: 7, color: '#fff', weight: 2, fillColor: '#237343', fillOpacity: 1 }).addTo(map);
+if (points.length > 1) L.circleMarker(points[points.length - 1], { radius: 7, color: '#fff', weight: 2, fillColor: '#F07824', fillOpacity: 1 }).addTo(map);
+map.fitBounds(bounds.pad(0.18), { maxZoom: 17 });
+</script></body></html>`;
+}
 
 const WALK_LOCATION_TASK = 'dojo-walk-active-route';
 const PHONEPE_QR_BASE64 = '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';
@@ -65,12 +90,18 @@ export default function App() {
   const [otp, setOtp] = useState('');
   const [otpSent, setOtpSent] = useState(false);
   const [profile, setProfile] = useState<Profile | null>(null);
+  const [walkerAccountStatus, setWalkerAccountStatus] = useState('active');
   const [userId, setUserId] = useState('');
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
   const [dogs, setDogs] = useState<Dog[]>([]);
   const [packages, setPackages] = useState<Package[]>([]);
+  const [walkPrices, setWalkPrices] = useState<WalkPrice[]>([]);
+  const [sundayExtraPayments, setSundayExtraPayments] = useState<SundayExtraPayment[]>([]);
+  const [sundaySchedule, setSundaySchedule] = useState('');
+  const [sundayDuration, setSundayDuration] = useState(30);
+  const [sundayUtr, setSundayUtr] = useState('');
   const [subscriptions, setSubscriptions] = useState<Subscription[]>([]);
   const [walkSchedules, setWalkSchedules] = useState<WalkSchedule[]>([]);
   const [scheduleChangeRequests, setScheduleChangeRequests] = useState<ScheduleChangeRequest[]>([]);
@@ -110,6 +141,7 @@ export default function App() {
 
   async function loadProfile(id: string) {
     if (!supabase) return;
+    setError('');
     const { data, error: profileError } = await supabase.from('profiles')
       .select('role, full_name, phone').eq('id', id).maybeSingle();
     if (profileError || !data) {
@@ -120,21 +152,32 @@ export default function App() {
     }
     setUserId(id);
     setProfile(data as Profile);
-    setPhoneInput(''); setOtp(''); setOtpSent(false); setError('');
+    if (data.role === 'walker') {
+      const { data: walkerRow, error: walkerStatusError } = await supabase.from('walkers').select('account_status').eq('id', id).maybeSingle();
+      if (walkerStatusError || !walkerRow) {
+        setWalkerAccountStatus('deactivated');
+        setError('Walker account status नहीं मिल पाया। Admin से संपर्क करें।');
+      } else {
+        setWalkerAccountStatus(walkerRow.account_status || 'active');
+      }
+    } else setWalkerAccountStatus('active');
+    setPhoneInput(''); setOtp(''); setOtpSent(false);
   }
 
   const loadCustomerData = useCallback(async () => {
     if (!supabase || !userId || profile?.role !== 'customer') return;
     setLoadingData(true); setError('');
-    const [dogResult, packageResult, subscriptionResult, payLaterResult, scheduleResult, scheduleChangeResult] = await Promise.all([
+    const [dogResult, packageResult, subscriptionResult, payLaterResult, scheduleResult, scheduleChangeResult, pricingResult, sundayPaymentResult] = await Promise.all([
       supabase.from('dogs').select('id, name, breed, age_years, notes, service_address, service_latitude, service_longitude').eq('customer_id', userId).order('created_at', { ascending: false }),
       supabase.from('service_packages').select('id, walks_per_day, duration_minutes, monthly_price_inr').eq('active', true).order('walks_per_day'),
       supabase.from('dog_subscriptions').select('id, dog_id, walks_per_day, duration_minutes, monthly_price_inr, starts_on, ends_on, status').eq('customer_id', userId).order('created_at', { ascending: false }),
       supabase.from('pay_later_requests').select('id, dog_id, status, created_at').eq('customer_id', userId).order('created_at', { ascending: false }),
       supabase.from('subscription_walk_schedules').select('id, subscription_id, dog_id, morning_time, evening_time, service_address, service_latitude, service_longitude, customer_notes').eq('customer_id', userId),
       supabase.from('subscription_schedule_change_requests').select('id, dog_id, status, admin_note, created_at').eq('customer_id', userId).order('created_at', { ascending: false }),
+      supabase.from('pricing').select('id,duration_minutes,price_inr,is_active').eq('is_active', true).gt('price_inr', 0).order('duration_minutes'),
+      supabase.rpc('customer_list_sunday_extra_walk_payments'),
     ]);
-    const failed = dogResult.error || packageResult.error || subscriptionResult.error || payLaterResult.error || scheduleResult.error || scheduleChangeResult.error;
+    const failed = dogResult.error || packageResult.error || subscriptionResult.error || payLaterResult.error || scheduleResult.error || scheduleChangeResult.error || pricingResult.error || sundayPaymentResult.error;
     if (failed) setError('जानकारी load नहीं हुई: ' + failed.message);
     else {
       setDogs((dogResult.data ?? []) as Dog[]);
@@ -154,6 +197,8 @@ export default function App() {
       setWalkSchedules((scheduleResult.data ?? []) as WalkSchedule[]);
       setScheduleChangeRequests((scheduleChangeResult.data ?? []) as ScheduleChangeRequest[]);
       setPayLaterRequests((payLaterResult.data ?? []) as { id: string; dog_id: string; status: string; created_at: string }[]);
+      setWalkPrices((pricingResult.data ?? []) as WalkPrice[]);
+      setSundayExtraPayments((sundayPaymentResult.data ?? []) as SundayExtraPayment[]);
     }
     setLoadingData(false);
   }, [userId, profile?.role, selectedDogId]);
@@ -183,6 +228,7 @@ export default function App() {
 
   const loadWalkerData = useCallback(async () => {
     if (!supabase || !userId || profile?.role !== 'walker') return;
+    if (walkerAccountStatus !== 'active') { setAssignedWalks([]); setLoadingData(false); return; }
     setLoadingData(true); setError('');
     const { data, error: queryError } = await supabase.from('bookings')
       .select('id, scheduled_at, duration_minutes, service_address, customer_notes, status, actual_started_at, actual_ended_at, actual_duration_minutes, walk_report, dog:dogs(name, breed)')
@@ -190,7 +236,7 @@ export default function App() {
     if (queryError) setError('Assigned walks load नहीं हुए: ' + queryError.message);
     else setAssignedWalks((data ?? []) as unknown as AssignedWalk[]);
     setLoadingData(false);
-  }, [userId, profile?.role]);
+  }, [userId, profile?.role, walkerAccountStatus]);
 
   useEffect(() => {
     if (!supabase) return;
@@ -215,7 +261,7 @@ export default function App() {
       .subscribe();
     return () => { void supabase?.removeChannel(channel); };
   }, [profile?.role, userId, loadCustomerWalks]);
-  useEffect(() => { if (profile?.role === 'walker' && userId) void loadWalkerData(); }, [profile?.role, userId, loadWalkerData]);
+  useEffect(() => { if (profile?.role === 'walker' && userId) void loadWalkerData(); }, [profile?.role, userId, walkerAccountStatus, loadWalkerData]);
 
 
 
@@ -224,7 +270,15 @@ export default function App() {
     const normalized = normalizeIndianPhone(phoneInput);
     if (!/^\+91[6-9]\d{9}$/.test(normalized)) { setError('कृपया सही 10 अंकों का Indian mobile number डालें।'); return; }
     setBusy(true); setError(''); setMessage('');
-    const { error: otpError } = await supabase.auth.signInWithOtp({ phone: normalized });
+    const { data: eligibility, error: eligibilityError } = await supabase.functions.invoke('check-login-phone', {
+      body: { phone: normalized },
+    });
+    if (eligibilityError || !eligibility?.allowed) {
+      setError('Invalid Number: यह मोबाइल नंबर DOJO WALK में रजिस्टर्ड नहीं है। Admin से संपर्क करें।');
+      setBusy(false);
+      return;
+    }
+    const { error: otpError } = await supabase.auth.signInWithOtp({ phone: normalized, options: { shouldCreateUser: false } });
     if (otpError) setError('OTP नहीं भेजा जा सका: ' + otpError.message);
     else { setPhone(normalized); setOtpSent(true); setMessage('OTP भेज दिया गया है। SMS में आया 6 अंकों का code डालें।'); }
     setBusy(false);
@@ -482,6 +536,41 @@ export default function App() {
     setBusy(false);
   }
 
+  async function submitSundayExtraWalk() {
+    if (!supabase || !selectedDogId) { setError('पहले dog चुनें।'); return; }
+    const match = /^(\d{4})-(\d{2})-(\d{2})\s+(\d{2}):(\d{2})$/.exec(sundaySchedule.trim());
+    if (!match) { setError('Sunday date और time YYYY-MM-DD HH:MM format में डालें।'); return; }
+    const [, y, m, d, h, min] = match;
+    const date = new Date(Number(y), Number(m)-1, Number(d), Number(h), Number(min));
+    if (date.getFullYear() !== Number(y) || date.getMonth() !== Number(m)-1 || date.getDate() !== Number(d) || date.getHours() !== Number(h) || date.getMinutes() !== Number(min) || date.getTime() <= Date.now()) {
+      setError('आने वाली सही date और time डालें।'); return;
+    }
+    if (date.getDay() !== 0) { setError('यह तारीख Sunday नहीं है।'); return; }
+    if (!bookingAddress.trim()) { setError('Dog का पूरा service address डालें।'); return; }
+    if (sundayUtr.trim().length < 6) { setError('Successful UPI payment के बाद transaction reference / UTR डालें।'); return; }
+    const selectedPrice = walkPrices.find((row) => row.duration_minutes === sundayDuration && row.is_active && row.price_inr > 0);
+    if (!selectedPrice) { setError('इस duration की price Admin ने अभी set नहीं की है।'); return; }
+    setBusy(true); setError(''); setMessage('');
+    const { error: requestError } = await supabase.rpc('customer_submit_sunday_extra_walk', {
+      p_dog_id: selectedDogId,
+      p_scheduled_at: date.toISOString(),
+      p_duration_minutes: sundayDuration,
+      p_service_address: bookingAddress.trim(),
+      p_customer_notes: bookingNotes.trim() || null,
+      p_upi_transaction_ref: sundayUtr.trim(),
+      p_latitude: bookingLatitude,
+      p_longitude: bookingLongitude,
+    });
+    if (requestError) setError('Sunday extra walk request नहीं बनी: ' + requestError.message);
+    else {
+      setSundaySchedule(''); setSundayUtr(''); setBookingNotes('');
+      setMessage('Sunday extra walk और payment reference Admin को भेज दिए गए हैं। Payment verify होने के बाद ही walk assign होगी।');
+      await loadCustomerData();
+      await loadCustomerWalks();
+    }
+    setBusy(false);
+  }
+
   async function addDog() {
     if (!supabase || !userId) return;
     if (!dogName.trim()) { setError('कुत्ते का नाम डालें।'); return; }
@@ -634,6 +723,17 @@ export default function App() {
                     </View> : null}
                     {walk.walk_report ? <Text style={styles.dogMeta}>Walker report: {walk.walk_report}</Text> : null}
                     {latest ? <><Text style={styles.dogMeta}>Latest GPS: {latest.latitude.toFixed(5)}, {latest.longitude.toFixed(5)}</Text><Pressable style={styles.textButton} onPress={() => void Linking.openURL(mapUrl)}><Text style={styles.textButtonLabel}>Open latest location in map ↗</Text></Pressable></> : <Text style={styles.dogMeta}>GPS location अभी उपलब्ध नहीं है।</Text>}
+                    {points.length > 0 ? <View style={styles.routeMapWrap}>
+                      <WebView
+                        key={walk.id + '-' + points.length}
+                        style={styles.routeMap}
+                        originWhitelist={['*']}
+                        javaScriptEnabled
+                        domStorageEnabled
+                        source={{ html: buildRouteMapHtml(points) }}
+                      />
+                      <Text style={styles.routeMapCaption}>हरा = शुरुआत · नारंगी = latest location · {points.length} GPS points</Text>
+                    </View> : null}
                     {first && latest && points.length > 1 ? <Text style={styles.dogMeta}>Route range: {first.latitude.toFixed(5)}, {first.longitude.toFixed(5)} → {latest.latitude.toFixed(5)}, {latest.longitude.toFixed(5)}</Text> : null}
                   </View>
                 </View>;
@@ -642,7 +742,7 @@ export default function App() {
               <View style={styles.sectionHeader}><View><Text style={styles.sectionTitle}>Monthly Packages</Text><Text style={styles.sectionHint}>Monday–Saturday · प्रति dog अलग package</Text></View></View>
               {dogs.length > 0 ? <>
                 <Text style={styles.label}>किस dog के लिए package चाहिए?</Text>
-                <View style={styles.choiceRow}>{dogs.map((dog) => <Pressable key={dog.id} onPress={() => setSelectedDogId(dog.id)} style={[styles.dogChoice, selectedDogId === dog.id && styles.dogChoiceSelected]}><Text style={[styles.dogChoiceText, selectedDogId === dog.id && styles.dogChoiceTextSelected]}>{dog.name}</Text></Pressable>)}</View>
+                <View style={styles.choiceRow}>{dogs.map((dog) => <Pressable key={dog.id} onPress={() => { setSelectedDogId(dog.id); setBookingAddress(dog.service_address || ''); setBookingLatitude(dog.service_latitude); setBookingLongitude(dog.service_longitude); }} style={[styles.dogChoice, selectedDogId === dog.id && styles.dogChoiceSelected]}><Text style={[styles.dogChoiceText, selectedDogId === dog.id && styles.dogChoiceTextSelected]}>{dog.name}</Text></Pressable>)}</View>
               </> : <Text style={styles.body}>Package लेने से पहले अपना dog profile जोड़ें।</Text>}
               {packages.length === 0 ? <Text style={styles.body}>Packages अभी load नहीं हुए। Refresh करके देखें।</Text> : packages.map((item) => <Pressable style={[styles.packageCard, selectedPackageId === item.id && styles.packageCardSelected]} key={item.id} onPress={() => { setSelectedPackageId(item.id); setUpiTransactionRef(''); setError(''); }}>
                 <View style={{ flex: 1 }}><Text style={styles.packageTitle}>{item.walks_per_day === 1 ? 'Daily Walk' : item.walks_per_day + ' Walks Daily'}</Text><Text style={styles.packageHint}>{item.duration_minutes} minutes per walk · Monday–Saturday</Text><Text style={styles.packageHint}>{selectedPackageId === item.id ? 'Selected' : 'Tap to select'}</Text></View>
@@ -664,10 +764,31 @@ export default function App() {
                 <Pressable style={[styles.primaryButton, (busy || !selectedDogId) && styles.disabled]} onPress={() => void submitPackagePayment()} disabled={busy || !selectedDogId}>{busy ? <ActivityIndicator color="#fff" /> : <Text style={styles.primaryText}>Submit Payment Details</Text>}</Pressable>
                 <Text style={styles.footnote}>Payment तभी submit करें जब PhonePe में transaction successful दिखे। Package Admin verification के बाद ही चालू होगा।</Text>
               </View> : null}
+              <View style={styles.paymentPanel}>
+                <Text style={styles.sectionTitle}>Sunday Extra Walk · अलग भुगतान</Text>
+                <Text style={styles.footnote}>Sunday की extra walk monthly package में शामिल नहीं है। Admin द्वारा तय 30/45/60 मिनट की per-walk price लागू होगी। पहले UPI payment करें; Admin verify करेगा तभी walk assign होगी।</Text>
+                <Text style={styles.label}>Sunday date & time · YYYY-MM-DD HH:MM</Text>
+                <TextInput value={sundaySchedule} onChangeText={setSundaySchedule} placeholder="2026-11-29 08:00" style={styles.input} autoCapitalize="none" />
+                <Text style={styles.label}>Walk duration</Text>
+                <View style={styles.choiceRow}>{walkPrices.map((row) => <Pressable key={row.id} onPress={() => setSundayDuration(row.duration_minutes)} style={[styles.dogChoice, sundayDuration === row.duration_minutes && styles.dogChoiceSelected]}><Text style={[styles.dogChoiceText, sundayDuration === row.duration_minutes && styles.dogChoiceTextSelected]}>{row.duration_minutes} min · {money(row.price_inr)}</Text></Pressable>)}</View>
+                <Text style={styles.body}>Payable amount: {money(walkPrices.find((row) => row.duration_minutes === sundayDuration)?.price_inr ?? 0)}</Text>
+                <Image source={{ uri: 'data:image/png;base64,' + PHONEPE_QR_BASE64 }} style={styles.paymentQr} resizeMode="contain" />
+                <Text style={styles.upiId}>{DOJO_UPI_ID}</Text>
+                <Text style={styles.label}>UPI transaction reference / UTR *</Text>
+                <TextInput value={sundayUtr} onChangeText={setSundayUtr} placeholder="Successful payment ka UTR" style={styles.input} autoCapitalize="characters" maxLength={100} />
+                <Pressable style={styles.outlineButton} onPress={() => {
+                  const price = walkPrices.find((row) => row.duration_minutes === sundayDuration)?.price_inr;
+                  if (!price) { setError('इस duration की price अभी उपलब्ध नहीं है।'); return; }
+                  void Linking.openURL('upi://pay?pa=' + encodeURIComponent(DOJO_UPI_ID) + '&pn=' + encodeURIComponent('Bapan Rajbanshi') + '&am=' + price + '&cu=INR&tn=' + encodeURIComponent('DOJO WALK Sunday extra walk')).catch(() => setError('UPI app नहीं खुला। QR scan करके payment करें।'));
+                }}><Text style={styles.outlineText}>Open UPI App</Text></Pressable>
+                <Pressable style={[styles.primaryButton, busy && styles.disabled]} onPress={() => void submitSundayExtraWalk()} disabled={busy || !selectedDogId || walkPrices.length === 0}><Text style={styles.primaryText}>{busy ? 'Please wait…' : 'Submit Sunday Walk & Payment Reference'}</Text></Pressable>
+                {sundayExtraPayments.length > 0 ? <View style={styles.notice}><Text style={styles.noticeTitle}>Sunday extra walk requests</Text>{sundayExtraPayments.slice(0,5).map((item) => <Text key={item.booking_id} style={styles.noticeBody}>{item.dog_name} · {new Date(item.scheduled_at).toLocaleString('en-IN')} · {money(item.amount_inr)} · {item.payment_status.toUpperCase()}{item.admin_note ? ' · ' + item.admin_note : ''}</Text>)}</View> : null}
+              </View>
               {payLaterRequests.length > 0 ? <View style={styles.notice}><Text style={styles.noticeTitle}>Pay Later requests</Text>{payLaterRequests.slice(0,5).map((request) => <Text key={request.id} style={styles.noticeBody}>{dogs.find((dog) => dog.id === request.dog_id)?.name || 'Dog'} · {request.status === 'pending' ? 'Admin approval pending' : request.status === 'approved' ? 'Approved' : 'Rejected'} · {new Date(request.created_at).toLocaleDateString('en-IN')}</Text>)}</View> : null}
               <View style={styles.notice}><Text style={styles.noticeTitle}>Payment verification</Text><Text style={styles.noticeBody}>आपका payment reference Admin verify करेगा। App payment को अपने-आप successful नहीं मानेगा।</Text></View>
               <Pressable style={styles.textButton} onPress={() => void loadCustomerData()}><Text style={styles.textButtonLabel}>↻ Refresh my details</Text></Pressable>
             </> : profile.role === 'walker' ? <>
+              {walkerAccountStatus !== 'active' ? <View style={styles.notice}><Text style={styles.noticeTitle}>Walker Account: {walkerAccountStatus.replace('_', ' ').toUpperCase()}</Text><Text style={styles.noticeBody}>आपका account अभी काम के लिए active नहीं है। कृपया DOJO WALK Admin से संपर्क करें।</Text></View> : <>
               <View style={styles.sectionHeader}><View><Text style={styles.sectionTitle}>मेरी Assigned Walks</Text><Text style={styles.sectionHint}>सिर्फ आपको assign की गई walks दिखाई जाती हैं।</Text></View><Pressable style={styles.smallPrimary} onPress={() => void loadWalkerData()}><Text style={styles.smallPrimaryText}>Refresh</Text></Pressable></View>
               {loadingData ? <ActivityIndicator color="#F07824" style={{ margin: 20 }} /> : assignedWalks.length === 0 ? <View style={styles.empty}><Text style={styles.emptyTitle}>अभी कोई walk assign नहीं हुई</Text><Text style={styles.body}>Admin द्वारा आपको dog और walk assign करने पर वह यहाँ दिखाई देगी।</Text></View> : assignedWalks.map((walk) => <View style={styles.dogCard} key={walk.id}>
                 <View style={styles.dogAvatar}><Text style={styles.dogAvatarText}>{(walk.dog?.name || 'D').slice(0, 1).toUpperCase()}</Text></View>
@@ -687,6 +808,7 @@ export default function App() {
               </View>)}
               {gpsMessage ? <Text style={styles.success}>{gpsMessage}</Text> : null}
               <View style={styles.notice}><Text style={styles.noticeTitle}>GPS tracking</Text><Text style={styles.noticeBody}>Walk active रहने पर GPS points save होते हैं। Background GPS के लिए location permission और native development build जरूरी है; Expo Go में background tracking उपलब्ध नहीं होती।</Text></View>
+              </>}
             </> : <View style={styles.card}>
               <Text style={styles.cardEyebrow}>{roleText.toUpperCase()}</Text>
               <Text style={styles.welcome}>Admin account connected</Text>
@@ -735,6 +857,9 @@ const styles = StyleSheet.create({
   smallPrimary: { backgroundColor: '#F07824', paddingHorizontal: 12, paddingVertical: 9, borderRadius: 9 },
   smallPrimaryText: { color: '#fff', fontSize: 11, fontWeight: '800' },
   dogCard: { flexDirection: 'row', alignItems: 'center', gap: 13, backgroundColor: '#fff', padding: 15, borderRadius: 15, borderWidth: 1, borderColor: '#F0E7E0', marginBottom: 10 },
+  routeMapWrap: { marginTop: 12, borderRadius: 12, overflow: 'hidden', borderWidth: 1, borderColor: '#F0E7E0' },
+  routeMap: { width: '100%', height: 220 },
+  routeMapCaption: { color: '#888', fontSize: 9, padding: 8, backgroundColor: '#fff' },
   dogAvatar: { width: 44, height: 44, borderRadius: 14, backgroundColor: '#FFF0E4', alignItems: 'center', justifyContent: 'center' },
   dogAvatarText: { color: '#C55D1B', fontSize: 19, fontWeight: '900' },
   dogName: { color: '#242424', fontSize: 15, fontWeight: '800' },
