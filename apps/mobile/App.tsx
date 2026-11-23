@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { StatusBar } from 'expo-status-bar';
 import * as Location from 'expo-location';
 import * as TaskManager from 'expo-task-manager';
-import MapView, { Circle, Polyline } from 'react-native-maps';
+import { WebView } from 'react-native-webview';
 import {
   ActivityIndicator, Image, KeyboardAvoidingView, Linking, Platform, Pressable,
   ScrollView, StyleSheet, Text, TextInput, View,
@@ -19,6 +19,28 @@ type WalkSchedule = { id: string; subscription_id: string; dog_id: string; morni
 type ScheduleChangeRequest = { id: string; dog_id: string; status: string; admin_note: string | null; created_at: string };
 type RoutePoint = { id: number; booking_id: string; latitude: number; longitude: number; recorded_at: string };
 type AssignedWalk = { id: string; scheduled_at: string; duration_minutes: number; service_address: string; customer_notes: string | null; status: string; actual_started_at: string | null; actual_ended_at: string | null; actual_duration_minutes: number | null; walk_report: string | null; dog: { name: string; breed: string | null } | null };
+
+function buildRouteMapHtml(points: RoutePoint[]) {
+  const coordinates = JSON.stringify(points.map((point) => [point.latitude, point.longitude])).replace(/</g, '\\u003c');
+  return `<!doctype html>
+<html><head><meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<style>html,body,#map{height:100%;width:100%;margin:0;padding:0} .leaflet-container{background:#f4f1ed}</style>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script></head>
+<body><div id="map"></div><script>
+const points = ${coordinates};
+const map = L.map('map', { zoomControl: true, attributionControl: true });
+L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+  maxZoom: 19,
+  attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+}).addTo(map);
+const bounds = L.latLngBounds(points);
+if (points.length > 1) L.polyline(points, { color: '#F07824', weight: 5, opacity: 0.9 }).addTo(map);
+L.circleMarker(points[0], { radius: 7, color: '#fff', weight: 2, fillColor: '#237343', fillOpacity: 1 }).addTo(map);
+if (points.length > 1) L.circleMarker(points[points.length - 1], { radius: 7, color: '#fff', weight: 2, fillColor: '#F07824', fillOpacity: 1 }).addTo(map);
+map.fitBounds(bounds.pad(0.18), { maxZoom: 17 });
+</script></body></html>`;
+}
 
 const WALK_LOCATION_TASK = 'dojo-walk-active-route';
 const PHONEPE_QR_BASE64 = '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';
@@ -636,22 +658,14 @@ export default function App() {
                     {walk.walk_report ? <Text style={styles.dogMeta}>Walker report: {walk.walk_report}</Text> : null}
                     {latest ? <><Text style={styles.dogMeta}>Latest GPS: {latest.latitude.toFixed(5)}, {latest.longitude.toFixed(5)}</Text><Pressable style={styles.textButton} onPress={() => void Linking.openURL(mapUrl)}><Text style={styles.textButtonLabel}>Open latest location in map ↗</Text></Pressable></> : <Text style={styles.dogMeta}>GPS location अभी उपलब्ध नहीं है।</Text>}
                     {points.length > 0 ? <View style={styles.routeMapWrap}>
-                      <MapView
+                      <WebView
                         key={walk.id + '-' + points.length}
                         style={styles.routeMap}
-                        initialRegion={{
-                          latitude: (Math.min(...points.map((point) => point.latitude)) + Math.max(...points.map((point) => point.latitude))) / 2,
-                          longitude: (Math.min(...points.map((point) => point.longitude)) + Math.max(...points.map((point) => point.longitude))) / 2,
-                          latitudeDelta: Math.max(0.003, (Math.max(...points.map((point) => point.latitude)) - Math.min(...points.map((point) => point.latitude))) * 1.6),
-                          longitudeDelta: Math.max(0.003, (Math.max(...points.map((point) => point.longitude)) - Math.min(...points.map((point) => point.longitude))) * 1.6),
-                        }}
-                        scrollEnabled
-                        zoomEnabled
-                      >
-                        {points.length > 1 ? <Polyline coordinates={points.map((point) => ({ latitude: point.latitude, longitude: point.longitude }))} strokeColor="#F07824" strokeWidth={5} /> : null}
-                        <Circle center={{ latitude: first.latitude, longitude: first.longitude }} radius={12} fillColor="#237343" strokeColor="#FFFFFF" strokeWidth={2} />
-                        {latest && latest.id !== first.id ? <Circle center={{ latitude: latest.latitude, longitude: latest.longitude }} radius={12} fillColor="#F07824" strokeColor="#FFFFFF" strokeWidth={2} /> : null}
-                      </MapView>
+                        originWhitelist={['*']}
+                        javaScriptEnabled
+                        domStorageEnabled
+                        source={{ html: buildRouteMapHtml(points) }}
+                      />
                       <Text style={styles.routeMapCaption}>हरा = शुरुआत · नारंगी = latest location · {points.length} GPS points</Text>
                     </View> : null}
                     {first && latest && points.length > 1 ? <Text style={styles.dogMeta}>Route range: {first.latitude.toFixed(5)}, {first.longitude.toFixed(5)} → {latest.latitude.toFixed(5)}, {latest.longitude.toFixed(5)}</Text> : null}
