@@ -1,12 +1,18 @@
 alter table public.walkers
-  add column if not exists account_status text not null default 'active',
+  add column if not exists account_status text not null default 'on_hold',
   add column if not exists status_changed_at timestamptz;
 
 alter table public.walkers
   add constraint walkers_account_status_check
   check (account_status in ('active', 'on_hold', 'suspended', 'deactivated'));
 
--- Existing legacy review values are left unchanged; new Admin-created accounts are marked approved by the creation function.
+-- Fail closed for legacy records: only already-approved Walkers remain active.
+-- Pending/rejected records require explicit verification before an Admin can activate them.
+update public.walkers
+set account_status = case
+  when verification_status::text = 'approved' then 'active'
+  else 'on_hold'
+end;
 
 create or replace function public.walker_start_booking(p_booking_id uuid)
 returns timestamptz
@@ -18,18 +24,20 @@ declare
   v_started_at timestamptz;
   v_status public.booking_status;
   v_account_status text;
+  v_verification_status text;
 begin
   if auth.uid() is null then raise exception 'Authentication required'; end if;
 
   -- Serialize Walker start against Admin status changes. Both operations lock
   -- the Walker row before inspecting/updating bookings.
-  select w.account_status into v_account_status
+  select w.account_status, w.verification_status::text
+    into v_account_status, v_verification_status
   from public.walkers w
   where w.id = auth.uid()
   for update;
 
-  if not found or v_account_status <> 'active' then
-    raise exception 'Walker account is not active';
+  if not found or v_account_status <> 'active' or v_verification_status <> 'approved' then
+    raise exception 'Walker account is not active and approved';
   end if;
 
   select b.status, b.actual_started_at into v_status, v_started_at
@@ -73,6 +81,7 @@ set search_path to ''
 as $function$
 declare
   v_current_status text;
+  v_verification_status text;
 begin
   if p_admin_id is null or not exists (
     select 1 from public.profiles p
@@ -85,13 +94,18 @@ begin
     raise exception 'Invalid account status';
   end if;
 
-  select w.account_status into v_current_status
+  select w.account_status, w.verification_status::text
+    into v_current_status, v_verification_status
   from public.walkers w
   where w.id = p_walker_id
   for update;
 
   if not found then
     raise exception 'Walker account not found';
+  end if;
+
+  if p_account_status = 'active' and v_verification_status <> 'approved' then
+    raise exception 'Only approved Walker accounts can be activated';
   end if;
 
   if v_current_status = 'deactivated' and p_account_status <> 'deactivated' then
