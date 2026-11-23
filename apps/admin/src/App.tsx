@@ -5,7 +5,8 @@ import { isSupabaseConfigured, supabase } from './lib/supabase';
 
 type AdminProfile = { role: string };
 type WalkerAdmin = { id: string; service_areas: string[]; experience_years: number; verification_status: string; profile: { full_name: string | null; phone: string | null } | null };
-type AssignmentBooking = { id: string; scheduled_at: string; duration_minutes: number; service_address: string; service_slot: string | null; service_latitude: number | null; service_longitude: number | null; status: string; walker_id: string | null; dog: { name: string } | null; customer: { full_name: string | null; phone: string | null } | null };
+type AssignmentBooking = { id: string; scheduled_at: string; duration_minutes: number; service_address: string; service_slot: string | null; service_latitude: number | null; service_longitude: number | null; status: string; walker_id: string | null; service_type: string; dog: { name: string } | null; customer: { full_name: string | null; phone: string | null } | null };
+type PendingSundayPayment = { payment_id: string; booking_id: string; customer_name: string | null; customer_phone: string | null; dog_name: string; scheduled_at: string; duration_minutes: number; service_address: string; amount_inr: number; upi_transaction_ref: string; submitted_at: string };
 type PricingRow = { id: string; duration_minutes: number; price_inr: number; is_active: boolean };
 type AdminCustomer = { id: string; full_name: string | null; phone: string | null; dogs: { id: string; name: string; breed: string | null; age_years: number | null; service_address: string | null; service_latitude: number | null; service_longitude: number | null }[] };
 type WalkerPayout = { id: string; walker_id: string; payout_month: string; gross_amount_inr: number; paid_amount_inr: number; status: string; walker: { profile: { full_name: string | null; phone: string | null } | null } | null };
@@ -100,6 +101,7 @@ export default function App() {
   const [metrics, setMetrics] = useState({ dogs: 0, activeSubscriptions: 0, todayWalks: 0, pendingPayments: 0 });
   const [walks, setWalks] = useState<Booking[]>([]);
   const [payments, setPayments] = useState<PendingPayment[]>([]);
+  const [sundayPayments, setSundayPayments] = useState<PendingSundayPayment[]>([]);
   const [payLaterRequests, setPayLaterRequests] = useState<PayLaterRequest[]>([]);
   const [routeWalks, setRouteWalks] = useState<RouteWalk[]>([]);
   const [lastUpdated, setLastUpdated] = useState('');
@@ -252,13 +254,15 @@ export default function App() {
   const loadOperations = useCallback(async () => {
     if (!supabase) return;
     setOperationsBusy(true);
-    const [walkerResult, bookingResult, pricingResult, payoutResult, customerResult, changeRequestResult, scheduleChangeResult] = await Promise.all([
+    const [walkerResult, bookingResult, sundayAssignmentResult, sundayPaymentResult, pricingResult, payoutResult, customerResult, changeRequestResult, scheduleChangeResult] = await Promise.all([
       supabase.from('walkers')
         .select('id,service_areas,experience_years,verification_status,profile:profiles!walkers_id_fkey(full_name,phone)')
         .order('created_at', { ascending: false }),
       supabase.from('bookings')
-        .select('id,scheduled_at,duration_minutes,service_address,service_slot,service_latitude,service_longitude,status,walker_id,dog:dogs(name),customer:profiles!bookings_customer_id_fkey(full_name,phone)')
-        .in('status', ['requested', 'assigned']).order('scheduled_at', { ascending: true }).limit(100),
+        .select('id,scheduled_at,duration_minutes,service_address,service_slot,service_latitude,service_longitude,status,walker_id,service_type,dog:dogs(name),customer:profiles!bookings_customer_id_fkey(full_name,phone)')
+        .neq('service_type','sunday_extra').in('status', ['requested', 'assigned']).order('scheduled_at', { ascending: true }).limit(100),
+      supabase.rpc('admin_list_assignable_sunday_extra_walks'),
+      supabase.rpc('admin_list_pending_booking_payments'),
       supabase.from('pricing').select('id,duration_minutes,price_inr,is_active').order('duration_minutes'),
       supabase.from('walker_payouts')
         .select('id,walker_id,payout_month,gross_amount_inr,paid_amount_inr,status,walker:walkers!walker_payouts_walker_id_fkey(profile:profiles!walkers_id_fkey(full_name,phone))')
@@ -273,11 +277,13 @@ export default function App() {
         .select('id,subscription_id,proposed_morning_time,proposed_evening_time,proposed_service_address,proposed_latitude,proposed_longitude,customer_note,status,admin_note,created_at,dog:dogs(name),customer:profiles!subscription_schedule_change_requests_customer_id_fkey(full_name,phone),schedule:subscription_walk_schedules!subscription_schedule_change_requests_schedule_id_fkey(morning_time,evening_time,service_address)')
         .eq('status', 'pending').order('created_at', { ascending: true }).limit(100),
     ]);
-    const failed = walkerResult.error || bookingResult.error || pricingResult.error || payoutResult.error || customerResult.error || changeRequestResult.error || scheduleChangeResult.error;
+    const failed = walkerResult.error || bookingResult.error || sundayAssignmentResult.error || sundayPaymentResult.error || pricingResult.error || payoutResult.error || customerResult.error || changeRequestResult.error || scheduleChangeResult.error;
     if (failed) setOperationsMessage('Management data load नहीं हुआ: ' + failed.message);
     else {
       setWalkersAdmin((walkerResult.data ?? []) as unknown as WalkerAdmin[]);
-      setAssignmentBookings((bookingResult.data ?? []) as unknown as AssignmentBooking[]);
+      const sundayAssignments = (sundayAssignmentResult.data ?? []).map((row) => ({ ...row, service_type: 'sunday_extra', dog: { name: row.dog_name }, customer: { full_name: row.customer_name, phone: row.customer_phone } })) as unknown as AssignmentBooking[];
+      setAssignmentBookings([...(bookingResult.data ?? []) as unknown as AssignmentBooking[], ...sundayAssignments]);
+      setSundayPayments((sundayPaymentResult.data ?? []) as unknown as PendingSundayPayment[]);
       const rows = (pricingResult.data ?? []) as PricingRow[];
       setPricingRows(rows);
       setPricingInputs(Object.fromEntries(rows.map((row) => [row.id, String(row.price_inr)])));
@@ -373,6 +379,20 @@ export default function App() {
     });
     if (reviewError) setOperationsMessage('Weekly schedule request update nahi hui: ' + reviewError.message);
     else setOperationsMessage(decision === 'approve' ? 'Weekly schedule approve ho gaya; future unassigned bookings naye time par generate hongi.' : 'Weekly schedule change reject ho gaya; purana schedule active hai.');
+    await loadOperations();
+    setOperationsBusy(false);
+  }
+
+  async function reviewSundayPayment(paymentId: string, decision: 'verified' | 'rejected') {
+    if (!supabase) return;
+    const note = decision === 'rejected' ? window.prompt('Payment reject karne ka reason likhen:') : null;
+    if (decision === 'rejected' && (!note || note.trim().length < 3)) return;
+    setOperationsBusy(true); setOperationsMessage('');
+    const { error: reviewError } = await supabase.rpc('admin_review_booking_payment', {
+      p_payment_id: paymentId, p_decision: decision, p_admin_note: note,
+    });
+    if (reviewError) setOperationsMessage('Sunday payment review नहीं हुआ: ' + reviewError.message);
+    else setOperationsMessage(decision === 'verified' ? 'Sunday payment verify हो गया; अब walk assignment queue में दिखेगी।' : 'Sunday payment reject हुआ और booking cancel कर दी गई।');
     await loadOperations();
     setOperationsBusy(false);
   }
@@ -597,6 +617,9 @@ export default function App() {
             <div className="panel-heading"><div><h3>Pending UPI payments</h3><p>Admin verification required</p></div><span className="subtle-count">{metrics.pendingPayments} pending</span></div>
             {payments.length === 0 ? <p className="empty">कोई pending payment नहीं है।</p> : <div className="payment-list">{payments.map((payment) => <div className="payment-row payment-review-row" key={payment.id}><div><strong>{money(payment.amount_inr)} · {payment.subscription?.dogs?.name || 'Dog not found'}</strong><small>{payment.customer?.full_name || 'Customer'} {payment.customer?.phone ? '· ' + payment.customer.phone : ''}</small><small>UTR: {payment.upi_transaction_ref || 'Not entered'}</small><small>{dateTime(payment.submitted_at)}</small><div className="payment-actions"><button className="refresh approve" onClick={() => void reviewPayment(payment.id, 'verified')}>Verify & activate</button><button className="refresh reject" onClick={() => void reviewPayment(payment.id, 'rejected')}>Reject</button></div></div><span className="pill pending">Pending</span></div>)}</div>}
             <p className="notice inline-notice">हर UTR को अपने PhonePe / bank statement में मिलाने के बाद ही Verify करें। Verify करने पर subscription आज से active होगा। Reject करने पर pending subscription cancel होगा।</p>
+            <h4>Sunday extra walk payments</h4>
+            {sundayPayments.length === 0 ? <p className="empty">कोई pending Sunday extra payment नहीं है।</p> : <div className="payment-list">{sundayPayments.map((payment) => <div className="payment-row payment-review-row" key={payment.payment_id}><div><strong>{payment.dog_name} · {money(payment.amount_inr)} · {payment.duration_minutes} min</strong><small>{payment.customer_name || 'Customer'} {payment.customer_phone ? '· ' + payment.customer_phone : ''}</small><small>{dateTime(payment.scheduled_at)} · {payment.service_address}</small><small>UTR: {payment.upi_transaction_ref}</small><small>Submitted {dateTime(payment.submitted_at)}</small><div className="payment-actions"><button className="refresh approve" disabled={operationsBusy} onClick={() => void reviewSundayPayment(payment.payment_id, 'verified')}>Verify payment</button><button className="refresh reject" disabled={operationsBusy} onClick={() => void reviewSundayPayment(payment.payment_id, 'rejected')}>Reject & cancel walk</button></div></div><span className="pill pending">Sunday · Pending</span></div>)}</div>}
+            <p className="notice inline-notice">Sunday extra walk ko assign karne se pehle PhonePe / bank statement mein UTR match karein. Verified booking tabhi assignment queue mein aayegi.</p>
           </article>
         </section>
         <section className="panel route-panel" id="dogs">
@@ -617,7 +640,7 @@ export default function App() {
         </section>
         <section className="panel route-panel" id="assignments">
           <div className="panel-heading"><div><h3>Walk assignment</h3><p>Assign each requested walk to one approved walker.</p></div></div>
-          {assignmentBookings.filter((booking) => booking.status === 'requested').length === 0 ? <p className="empty">कोई unassigned walk request नहीं है।</p> : <div className="payment-list">{assignmentBookings.filter((booking) => booking.status === 'requested').map((booking) => <div className="payment-row payment-review-row" key={booking.id}><div><strong>{booking.dog?.name || 'Dog'} · {booking.duration_minutes} min</strong><small>{booking.customer?.full_name || 'Customer'} {booking.customer?.phone ? '· ' + booking.customer.phone : ''}</small><small>{dateTime(booking.scheduled_at)} · {booking.service_slot ? booking.service_slot.toUpperCase() + ' · ' : ''}{booking.service_address}</small>{booking.service_latitude !== null && booking.service_longitude !== null ? <small><a className="map-link" href={'https://www.openstreetmap.org/?mlat=' + booking.service_latitude + '&mlon=' + booking.service_longitude + '#map=17/' + booking.service_latitude + '/' + booking.service_longitude} target="_blank" rel="noreferrer">Open pickup pin ↗</a></small> : null}<div className="payment-actions"><select value={walkerSelections[booking.id] || ''} onChange={(event) => setWalkerSelections((current) => ({ ...current, [booking.id]: event.target.value }))}><option value="">Approved walker चुनें</option>{walkersAdmin.filter((walker) => walker.verification_status === 'approved').map((walker) => <option key={walker.id} value={walker.id}>{walker.profile?.full_name || walker.profile?.phone || walker.id.slice(0, 8)}</option>)}</select><button className="refresh approve" disabled={operationsBusy} onClick={() => void assignBooking(booking.id)}>Assign walk</button></div></div><span className="pill pending">Requested</span></div>)}</div>}
+          {assignmentBookings.filter((booking) => booking.status === 'requested').length === 0 ? <p className="empty">कोई unassigned walk request नहीं है।</p> : <div className="payment-list">{assignmentBookings.filter((booking) => booking.status === 'requested').map((booking) => <div className="payment-row payment-review-row" key={booking.id}><div><strong>{booking.dog?.name || 'Dog'} · {booking.duration_minutes} min{booking.service_type === 'sunday_extra' ? ' · Sunday Extra · Paid' : ''}</strong><small>{booking.customer?.full_name || 'Customer'} {booking.customer?.phone ? '· ' + booking.customer.phone : ''}</small><small>{dateTime(booking.scheduled_at)} · {booking.service_slot ? booking.service_slot.toUpperCase() + ' · ' : ''}{booking.service_address}</small>{booking.service_latitude !== null && booking.service_longitude !== null ? <small><a className="map-link" href={'https://www.openstreetmap.org/?mlat=' + booking.service_latitude + '&mlon=' + booking.service_longitude + '#map=17/' + booking.service_latitude + '/' + booking.service_longitude} target="_blank" rel="noreferrer">Open pickup pin ↗</a></small> : null}<div className="payment-actions"><select value={walkerSelections[booking.id] || ''} onChange={(event) => setWalkerSelections((current) => ({ ...current, [booking.id]: event.target.value }))}><option value="">Approved walker चुनें</option>{walkersAdmin.filter((walker) => walker.verification_status === 'approved').map((walker) => <option key={walker.id} value={walker.id}>{walker.profile?.full_name || walker.profile?.phone || walker.id.slice(0, 8)}</option>)}</select><button className="refresh approve" disabled={operationsBusy} onClick={() => void assignBooking(booking.id)}>Assign walk</button></div></div><span className="pill pending">Requested</span></div>)}</div>}
           {assignmentBookings.some((booking) => booking.status === 'assigned') ? <p className="notice inline-notice">{assignmentBookings.filter((booking) => booking.status === 'assigned').length} walk(s) already assigned. Walker sees only their own assigned walks.</p> : null}
         </section>
         <section className="panel route-panel" id="pricing">

@@ -12,6 +12,8 @@ import { isSupabaseConfigured, supabase } from './lib/supabase';
 type Profile = { role: 'customer' | 'walker' | 'admin'; full_name: string | null; phone: string | null };
 type Dog = { id: string; name: string; breed: string | null; age_years: number | null; notes: string | null; service_address: string | null; service_latitude: number | null; service_longitude: number | null };
 type Package = { id: string; walks_per_day: number; duration_minutes: number; monthly_price_inr: number };
+type WalkPrice = { id: string; duration_minutes: number; price_inr: number; is_active: boolean };
+type SundayExtraPayment = { booking_id: string; dog_name: string; scheduled_at: string; duration_minutes: number; amount_inr: number; upi_transaction_ref: string; payment_status: string; submitted_at: string; admin_note: string | null };
 type Subscription = { id: string; dog_id: string; walks_per_day: number; duration_minutes: number; monthly_price_inr: number; starts_on: string; ends_on: string; status: string };
 type CustomerWalk = { id: string; scheduled_at: string; service_address: string; service_slot: string | null; status: string; actual_started_at: string | null; actual_ended_at: string | null; actual_duration_minutes: number | null; walk_report: string | null; dog: { name: string } | null };
 type CustomerChangeRequest = { id: string; booking_id: string; status: string; proposed_scheduled_at: string | null; proposed_service_address: string | null; proposed_service_slot: string | null; admin_note: string | null; created_at: string };
@@ -94,6 +96,11 @@ export default function App() {
   const [error, setError] = useState('');
   const [dogs, setDogs] = useState<Dog[]>([]);
   const [packages, setPackages] = useState<Package[]>([]);
+  const [walkPrices, setWalkPrices] = useState<WalkPrice[]>([]);
+  const [sundayExtraPayments, setSundayExtraPayments] = useState<SundayExtraPayment[]>([]);
+  const [sundaySchedule, setSundaySchedule] = useState('');
+  const [sundayDuration, setSundayDuration] = useState(30);
+  const [sundayUtr, setSundayUtr] = useState('');
   const [subscriptions, setSubscriptions] = useState<Subscription[]>([]);
   const [walkSchedules, setWalkSchedules] = useState<WalkSchedule[]>([]);
   const [scheduleChangeRequests, setScheduleChangeRequests] = useState<ScheduleChangeRequest[]>([]);
@@ -149,15 +156,17 @@ export default function App() {
   const loadCustomerData = useCallback(async () => {
     if (!supabase || !userId || profile?.role !== 'customer') return;
     setLoadingData(true); setError('');
-    const [dogResult, packageResult, subscriptionResult, payLaterResult, scheduleResult, scheduleChangeResult] = await Promise.all([
+    const [dogResult, packageResult, subscriptionResult, payLaterResult, scheduleResult, scheduleChangeResult, pricingResult, sundayPaymentResult] = await Promise.all([
       supabase.from('dogs').select('id, name, breed, age_years, notes, service_address, service_latitude, service_longitude').eq('customer_id', userId).order('created_at', { ascending: false }),
       supabase.from('service_packages').select('id, walks_per_day, duration_minutes, monthly_price_inr').eq('active', true).order('walks_per_day'),
       supabase.from('dog_subscriptions').select('id, dog_id, walks_per_day, duration_minutes, monthly_price_inr, starts_on, ends_on, status').eq('customer_id', userId).order('created_at', { ascending: false }),
       supabase.from('pay_later_requests').select('id, dog_id, status, created_at').eq('customer_id', userId).order('created_at', { ascending: false }),
       supabase.from('subscription_walk_schedules').select('id, subscription_id, dog_id, morning_time, evening_time, service_address, service_latitude, service_longitude, customer_notes').eq('customer_id', userId),
       supabase.from('subscription_schedule_change_requests').select('id, dog_id, status, admin_note, created_at').eq('customer_id', userId).order('created_at', { ascending: false }),
+      supabase.from('pricing').select('id,duration_minutes,price_inr,is_active').eq('is_active', true).gt('price_inr', 0).order('duration_minutes'),
+      supabase.rpc('customer_list_sunday_extra_walk_payments'),
     ]);
-    const failed = dogResult.error || packageResult.error || subscriptionResult.error || payLaterResult.error || scheduleResult.error || scheduleChangeResult.error;
+    const failed = dogResult.error || packageResult.error || subscriptionResult.error || payLaterResult.error || scheduleResult.error || scheduleChangeResult.error || pricingResult.error || sundayPaymentResult.error;
     if (failed) setError('जानकारी load नहीं हुई: ' + failed.message);
     else {
       setDogs((dogResult.data ?? []) as Dog[]);
@@ -177,6 +186,8 @@ export default function App() {
       setWalkSchedules((scheduleResult.data ?? []) as WalkSchedule[]);
       setScheduleChangeRequests((scheduleChangeResult.data ?? []) as ScheduleChangeRequest[]);
       setPayLaterRequests((payLaterResult.data ?? []) as { id: string; dog_id: string; status: string; created_at: string }[]);
+      setWalkPrices((pricingResult.data ?? []) as WalkPrice[]);
+      setSundayExtraPayments((sundayPaymentResult.data ?? []) as SundayExtraPayment[]);
     }
     setLoadingData(false);
   }, [userId, profile?.role, selectedDogId]);
@@ -505,6 +516,41 @@ export default function App() {
     setBusy(false);
   }
 
+  async function submitSundayExtraWalk() {
+    if (!supabase || !selectedDogId) { setError('पहले dog चुनें।'); return; }
+    const match = /^(\d{4})-(\d{2})-(\d{2})\s+(\d{2}):(\d{2})$/.exec(sundaySchedule.trim());
+    if (!match) { setError('Sunday date और time YYYY-MM-DD HH:MM format में डालें।'); return; }
+    const [, y, m, d, h, min] = match;
+    const date = new Date(Number(y), Number(m)-1, Number(d), Number(h), Number(min));
+    if (date.getFullYear() !== Number(y) || date.getMonth() !== Number(m)-1 || date.getDate() !== Number(d) || date.getHours() !== Number(h) || date.getMinutes() !== Number(min) || date.getTime() <= Date.now()) {
+      setError('आने वाली सही date और time डालें।'); return;
+    }
+    if (date.getDay() !== 0) { setError('यह तारीख Sunday नहीं है।'); return; }
+    if (!bookingAddress.trim()) { setError('Dog का पूरा service address डालें।'); return; }
+    if (sundayUtr.trim().length < 6) { setError('Successful UPI payment के बाद transaction reference / UTR डालें।'); return; }
+    const selectedPrice = walkPrices.find((row) => row.duration_minutes === sundayDuration && row.is_active && row.price_inr > 0);
+    if (!selectedPrice) { setError('इस duration की price Admin ने अभी set नहीं की है।'); return; }
+    setBusy(true); setError(''); setMessage('');
+    const { error: requestError } = await supabase.rpc('customer_submit_sunday_extra_walk', {
+      p_dog_id: selectedDogId,
+      p_scheduled_at: date.toISOString(),
+      p_duration_minutes: sundayDuration,
+      p_service_address: bookingAddress.trim(),
+      p_customer_notes: bookingNotes.trim() || null,
+      p_upi_transaction_ref: sundayUtr.trim(),
+      p_latitude: bookingLatitude,
+      p_longitude: bookingLongitude,
+    });
+    if (requestError) setError('Sunday extra walk request नहीं बनी: ' + requestError.message);
+    else {
+      setSundaySchedule(''); setSundayUtr(''); setBookingNotes('');
+      setMessage('Sunday extra walk और payment reference Admin को भेज दिए गए हैं। Payment verify होने के बाद ही walk assign होगी।');
+      await loadCustomerData();
+      await loadCustomerWalks();
+    }
+    setBusy(false);
+  }
+
   async function addDog() {
     if (!supabase || !userId) return;
     if (!dogName.trim()) { setError('कुत्ते का नाम डालें।'); return; }
@@ -676,7 +722,7 @@ export default function App() {
               <View style={styles.sectionHeader}><View><Text style={styles.sectionTitle}>Monthly Packages</Text><Text style={styles.sectionHint}>Monday–Saturday · प्रति dog अलग package</Text></View></View>
               {dogs.length > 0 ? <>
                 <Text style={styles.label}>किस dog के लिए package चाहिए?</Text>
-                <View style={styles.choiceRow}>{dogs.map((dog) => <Pressable key={dog.id} onPress={() => setSelectedDogId(dog.id)} style={[styles.dogChoice, selectedDogId === dog.id && styles.dogChoiceSelected]}><Text style={[styles.dogChoiceText, selectedDogId === dog.id && styles.dogChoiceTextSelected]}>{dog.name}</Text></Pressable>)}</View>
+                <View style={styles.choiceRow}>{dogs.map((dog) => <Pressable key={dog.id} onPress={() => { setSelectedDogId(dog.id); setBookingAddress(dog.service_address || ''); setBookingLatitude(dog.service_latitude); setBookingLongitude(dog.service_longitude); }} style={[styles.dogChoice, selectedDogId === dog.id && styles.dogChoiceSelected]}><Text style={[styles.dogChoiceText, selectedDogId === dog.id && styles.dogChoiceTextSelected]}>{dog.name}</Text></Pressable>)}</View>
               </> : <Text style={styles.body}>Package लेने से पहले अपना dog profile जोड़ें।</Text>}
               {packages.length === 0 ? <Text style={styles.body}>Packages अभी load नहीं हुए। Refresh करके देखें।</Text> : packages.map((item) => <Pressable style={[styles.packageCard, selectedPackageId === item.id && styles.packageCardSelected]} key={item.id} onPress={() => { setSelectedPackageId(item.id); setUpiTransactionRef(''); setError(''); }}>
                 <View style={{ flex: 1 }}><Text style={styles.packageTitle}>{item.walks_per_day === 1 ? 'Daily Walk' : item.walks_per_day + ' Walks Daily'}</Text><Text style={styles.packageHint}>{item.duration_minutes} minutes per walk · Monday–Saturday</Text><Text style={styles.packageHint}>{selectedPackageId === item.id ? 'Selected' : 'Tap to select'}</Text></View>
@@ -698,6 +744,26 @@ export default function App() {
                 <Pressable style={[styles.primaryButton, (busy || !selectedDogId) && styles.disabled]} onPress={() => void submitPackagePayment()} disabled={busy || !selectedDogId}>{busy ? <ActivityIndicator color="#fff" /> : <Text style={styles.primaryText}>Submit Payment Details</Text>}</Pressable>
                 <Text style={styles.footnote}>Payment तभी submit करें जब PhonePe में transaction successful दिखे। Package Admin verification के बाद ही चालू होगा।</Text>
               </View> : null}
+              <View style={styles.paymentPanel}>
+                <Text style={styles.sectionTitle}>Sunday Extra Walk · अलग भुगतान</Text>
+                <Text style={styles.footnote}>Sunday की extra walk monthly package में शामिल नहीं है। Admin द्वारा तय 30/45/60 मिनट की per-walk price लागू होगी। पहले UPI payment करें; Admin verify करेगा तभी walk assign होगी।</Text>
+                <Text style={styles.label}>Sunday date & time · YYYY-MM-DD HH:MM</Text>
+                <TextInput value={sundaySchedule} onChangeText={setSundaySchedule} placeholder="2026-11-29 08:00" style={styles.input} autoCapitalize="none" />
+                <Text style={styles.label}>Walk duration</Text>
+                <View style={styles.choiceRow}>{walkPrices.map((row) => <Pressable key={row.id} onPress={() => setSundayDuration(row.duration_minutes)} style={[styles.dogChoice, sundayDuration === row.duration_minutes && styles.dogChoiceSelected]}><Text style={[styles.dogChoiceText, sundayDuration === row.duration_minutes && styles.dogChoiceTextSelected]}>{row.duration_minutes} min · {money(row.price_inr)}</Text></Pressable>)}</View>
+                <Text style={styles.body}>Payable amount: {money(walkPrices.find((row) => row.duration_minutes === sundayDuration)?.price_inr ?? 0)}</Text>
+                <Image source={{ uri: 'data:image/png;base64,' + PHONEPE_QR_BASE64 }} style={styles.paymentQr} resizeMode="contain" />
+                <Text style={styles.upiId}>{DOJO_UPI_ID}</Text>
+                <Text style={styles.label}>UPI transaction reference / UTR *</Text>
+                <TextInput value={sundayUtr} onChangeText={setSundayUtr} placeholder="Successful payment ka UTR" style={styles.input} autoCapitalize="characters" maxLength={100} />
+                <Pressable style={styles.outlineButton} onPress={() => {
+                  const price = walkPrices.find((row) => row.duration_minutes === sundayDuration)?.price_inr;
+                  if (!price) { setError('इस duration की price अभी उपलब्ध नहीं है।'); return; }
+                  void Linking.openURL('upi://pay?pa=' + encodeURIComponent(DOJO_UPI_ID) + '&pn=' + encodeURIComponent('Bapan Rajbanshi') + '&am=' + price + '&cu=INR&tn=' + encodeURIComponent('DOJO WALK Sunday extra walk')).catch(() => setError('UPI app नहीं खुला। QR scan करके payment करें।'));
+                }}><Text style={styles.outlineText}>Open UPI App</Text></Pressable>
+                <Pressable style={[styles.primaryButton, busy && styles.disabled]} onPress={() => void submitSundayExtraWalk()} disabled={busy || !selectedDogId || walkPrices.length === 0}><Text style={styles.primaryText}>{busy ? 'Please wait…' : 'Submit Sunday Walk & Payment Reference'}</Text></Pressable>
+                {sundayExtraPayments.length > 0 ? <View style={styles.notice}><Text style={styles.noticeTitle}>Sunday extra walk requests</Text>{sundayExtraPayments.slice(0,5).map((item) => <Text key={item.booking_id} style={styles.noticeBody}>{item.dog_name} · {new Date(item.scheduled_at).toLocaleString('en-IN')} · {money(item.amount_inr)} · {item.payment_status.toUpperCase()}{item.admin_note ? ' · ' + item.admin_note : ''}</Text>)}</View> : null}
+              </View>
               {payLaterRequests.length > 0 ? <View style={styles.notice}><Text style={styles.noticeTitle}>Pay Later requests</Text>{payLaterRequests.slice(0,5).map((request) => <Text key={request.id} style={styles.noticeBody}>{dogs.find((dog) => dog.id === request.dog_id)?.name || 'Dog'} · {request.status === 'pending' ? 'Admin approval pending' : request.status === 'approved' ? 'Approved' : 'Rejected'} · {new Date(request.created_at).toLocaleDateString('en-IN')}</Text>)}</View> : null}
               <View style={styles.notice}><Text style={styles.noticeTitle}>Payment verification</Text><Text style={styles.noticeBody}>आपका payment reference Admin verify करेगा। App payment को अपने-आप successful नहीं मानेगा।</Text></View>
               <Pressable style={styles.textButton} onPress={() => void loadCustomerData()}><Text style={styles.textButtonLabel}>↻ Refresh my details</Text></Pressable>
