@@ -30,9 +30,9 @@ npx expo-doctor
 
 Use Expo-recommended package versions if a compatibility mismatch is reported.
 
-## 5. Android native map setup
+## 5. OpenStreetMap setup
 
-The mobile embedded map uses `react-native-maps`. Android production builds need a Google Maps SDK API key configured through the native app configuration/build environment. Restrict the key to the Android package and signing certificate. Do not commit or share the key in chat.
+Both Admin and mobile route maps use Leaflet with OpenStreetMap tiles. The mobile map is rendered with `react-native-webview`; no Google Maps SDK key or billing account is required. Map tiles and Leaflet assets load over the internet. Keep the required visible OpenStreetMap attribution and follow the public tile service usage policy; for high-volume production traffic, choose a tile provider with an appropriate service plan.
 
 A native development build is required to validate background location; Expo Go is not sufficient.
 
