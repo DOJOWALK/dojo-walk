@@ -4,7 +4,9 @@ import 'leaflet/dist/leaflet.css';
 import { isSupabaseConfigured, supabase } from './lib/supabase';
 
 type AdminProfile = { role: string };
-type WalkerAdmin = { id: string; service_areas: string[]; experience_years: number; verification_status: string; profile: { full_name: string | null; phone: string | null } | null };
+type WalkerAdmin = { id: string; service_areas: string[]; experience_years: number; verification_status: string; account_status: string; profile: { full_name: string | null; phone: string | null } | null };
+type WalkerDocumentType = 'profile_selfie' | 'aadhaar_front' | 'aadhaar_back' | 'pan_card';
+type WalkerDocument = { id: string; walker_id: string; document_type: WalkerDocumentType; object_path: string; mime_type: string; file_size_bytes: number; created_at: string };
 type AssignmentBooking = { id: string; scheduled_at: string; duration_minutes: number; service_address: string; service_slot: string | null; service_latitude: number | null; service_longitude: number | null; status: string; walker_id: string | null; service_type: string; dog: { name: string } | null; customer: { full_name: string | null; phone: string | null } | null };
 type PendingSundayPayment = { payment_id: string; booking_id: string; customer_name: string | null; customer_phone: string | null; dog_name: string; scheduled_at: string; duration_minutes: number; service_address: string; amount_inr: number; upi_transaction_ref: string; submitted_at: string };
 type PricingRow = { id: string; duration_minutes: number; price_inr: number; is_active: boolean };
@@ -117,6 +119,7 @@ export default function App() {
   const [creditBusy, setCreditBusy] = useState(false);
   const [creditMessage, setCreditMessage] = useState('');
   const [walkersAdmin, setWalkersAdmin] = useState<WalkerAdmin[]>([]);
+  const [walkerDocuments, setWalkerDocuments] = useState<WalkerDocument[]>([]);
   const [assignmentBookings, setAssignmentBookings] = useState<AssignmentBooking[]>([]);
   const [pricingRows, setPricingRows] = useState<PricingRow[]>([]);
   const [walkerSelections, setWalkerSelections] = useState<Record<string, string>>({});
@@ -127,6 +130,13 @@ export default function App() {
   const [subscriptionScheduleChanges, setSubscriptionScheduleChanges] = useState<SubscriptionScheduleChange[]>([]);
   const [operationsBusy, setOperationsBusy] = useState(false);
   const [operationsMessage, setOperationsMessage] = useState('');
+  const [walkerName, setWalkerName] = useState('');
+  const [walkerPhone, setWalkerPhone] = useState('');
+  const [walkerExperience, setWalkerExperience] = useState('0');
+  const [walkerAreas, setWalkerAreas] = useState('Gaur City 1, Gaur City 2');
+  const [walkerBio, setWalkerBio] = useState('');
+  const [walkerLocalAddress, setWalkerLocalAddress] = useState('');
+  const [walkerPermanentAddress, setWalkerPermanentAddress] = useState('');
 
   async function verifyAdmin(userId: string, userEmail?: string) {
     if (!supabase) return;
@@ -254,9 +264,9 @@ export default function App() {
   const loadOperations = useCallback(async () => {
     if (!supabase) return;
     setOperationsBusy(true);
-    const [walkerResult, bookingResult, sundayAssignmentResult, sundayPaymentResult, pricingResult, payoutResult, customerResult, changeRequestResult, scheduleChangeResult] = await Promise.all([
+    const [walkerResult, bookingResult, sundayAssignmentResult, sundayPaymentResult, pricingResult, payoutResult, customerResult, changeRequestResult, scheduleChangeResult, documentResult] = await Promise.all([
       supabase.from('walkers')
-        .select('id,service_areas,experience_years,verification_status,profile:profiles!walkers_id_fkey(full_name,phone)')
+        .select('id,service_areas,experience_years,verification_status,account_status,profile:profiles!walkers_id_fkey(full_name,phone)')
         .order('created_at', { ascending: false }),
       supabase.from('bookings')
         .select('id,scheduled_at,duration_minutes,service_address,service_slot,service_latitude,service_longitude,status,walker_id,service_type,dog:dogs(name),customer:profiles!bookings_customer_id_fkey(full_name,phone)')
@@ -276,11 +286,13 @@ export default function App() {
       supabase.from('subscription_schedule_change_requests')
         .select('id,subscription_id,proposed_morning_time,proposed_evening_time,proposed_service_address,proposed_latitude,proposed_longitude,customer_note,status,admin_note,created_at,dog:dogs(name),customer:profiles!subscription_schedule_change_requests_customer_id_fkey(full_name,phone),schedule:subscription_walk_schedules!subscription_schedule_change_requests_schedule_id_fkey(morning_time,evening_time,service_address)')
         .eq('status', 'pending').order('created_at', { ascending: true }).limit(100),
+      supabase.from('walker_documents').select('id,walker_id,document_type,object_path,mime_type,file_size_bytes,created_at').order('created_at', { ascending: false }),
     ]);
-    const failed = walkerResult.error || bookingResult.error || sundayAssignmentResult.error || sundayPaymentResult.error || pricingResult.error || payoutResult.error || customerResult.error || changeRequestResult.error || scheduleChangeResult.error;
+    const failed = walkerResult.error || bookingResult.error || sundayAssignmentResult.error || sundayPaymentResult.error || pricingResult.error || payoutResult.error || customerResult.error || changeRequestResult.error || scheduleChangeResult.error || documentResult.error;
     if (failed) setOperationsMessage('Management data load नहीं हुआ: ' + failed.message);
     else {
       setWalkersAdmin((walkerResult.data ?? []) as unknown as WalkerAdmin[]);
+      setWalkerDocuments((documentResult.data ?? []) as WalkerDocument[]);
       const sundayAssignments = (sundayAssignmentResult.data ?? []).map((row) => ({ ...row, service_type: 'sunday_extra', dog: { name: row.dog_name }, customer: { full_name: row.customer_name, phone: row.customer_phone } })) as unknown as AssignmentBooking[];
       setAssignmentBookings([...(bookingResult.data ?? []) as unknown as AssignmentBooking[], ...sundayAssignments]);
       setSundayPayments((sundayPaymentResult.data ?? []) as unknown as PendingSundayPayment[]);
@@ -300,16 +312,145 @@ export default function App() {
     if (isAdmin) void loadOperations();
   }, [isAdmin, loadOperations]);
 
-  async function reviewWalker(walkerId: string, decision: 'approved' | 'rejected') {
+  async function createWalkerAccount() {
     if (!supabase) return;
-    const note = decision === 'rejected' ? window.prompt('Walker reject करने का कारण लिखें:') : null;
-    if (decision === 'rejected' && (!note || note.trim().length < 3)) return;
+    const phoneDigits = walkerPhone.replace(/[\s()-]/g, '');
+    const phone = phoneDigits.startsWith('+91') ? phoneDigits : '+91' + phoneDigits.replace(/^0/, '');
+    const experience = Number(walkerExperience);
+    const areas = walkerAreas.split(',').map((area) => area.trim()).filter(Boolean);
+    if (walkerName.trim().length < 2) { setOperationsMessage('Walker का पूरा नाम डालें।'); return; }
+    if (!/^\+91[6-9]\d{9}$/.test(phone)) { setOperationsMessage('सही 10 अंकों का Indian mobile number डालें।'); return; }
+    if (!Number.isFinite(experience) || experience < 0 || experience > 60) { setOperationsMessage('Experience 0 से 60 साल के बीच डालें।'); return; }
+    if (!areas.length) { setOperationsMessage('कम से कम एक service area डालें।'); return; }
     setOperationsBusy(true); setOperationsMessage('');
-    const { error: updateError } = await supabase.from('walkers')
-      .update({ verification_status: decision, approved_at: decision === 'approved' ? new Date().toISOString() : null })
-      .eq('id', walkerId);
-    if (updateError) setOperationsMessage('Walker status update नहीं हुआ: ' + updateError.message);
-    else setOperationsMessage(decision === 'approved' ? 'Walker approve हो गया।' : 'Walker reject हो गया: ' + note);
+    const { data, error: createError } = await supabase.functions.invoke('admin-create-walker', {
+      body: {
+        full_name: walkerName.trim(),
+        phone,
+        experience_years: experience,
+        service_areas: areas,
+        bio: walkerBio.trim(),
+        local_address: walkerLocalAddress.trim(),
+        permanent_address: walkerPermanentAddress.trim(),
+      },
+    });
+    if (createError || data?.error) {
+      setOperationsMessage('Walker account नहीं बना: ' + (data?.error || createError?.message || 'Unknown error'));
+    } else {
+      setWalkerName(''); setWalkerPhone(''); setWalkerExperience('0'); setWalkerBio(''); setWalkerLocalAddress(''); setWalkerPermanentAddress('');
+      setOperationsMessage('Walker account बन गया। Mobile OTP verify होने के बाद वह काम कर सकेगा।');
+      await loadOperations();
+    }
+    setOperationsBusy(false);
+  }
+
+  async function uploadWalkerDocument(walkerId: string, documentType: WalkerDocumentType, file: File | undefined) {
+    if (!supabase || !file) return;
+    const allowedTypes = ['image/jpeg', 'image/png', 'image/webp', 'application/pdf'];
+    if (!allowedTypes.includes(file.type)) {
+      setOperationsMessage('केवल JPG, PNG, WEBP या PDF document upload करें।');
+      return;
+    }
+    if (file.size <= 0 || file.size > 5 * 1024 * 1024) {
+      setOperationsMessage('File size 5 MB से कम होनी चाहिए।');
+      return;
+    }
+    const header = new Uint8Array(await file.slice(0, 12).arrayBuffer());
+    const startsWith = (...values: number[]) => values.every((value, index) => header[index] === value);
+    const isJpeg = file.type === 'image/jpeg' && startsWith(0xff, 0xd8, 0xff);
+    const isPng = file.type === 'image/png' && startsWith(0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a);
+    const isWebp = file.type === 'image/webp' && startsWith(0x52, 0x49, 0x46, 0x46) && header[8] === 0x57 && header[9] === 0x45 && header[10] === 0x42 && header[11] === 0x50;
+    const isPdf = file.type === 'application/pdf' && startsWith(0x25, 0x50, 0x44, 0x46, 0x2d);
+    if (!(isJpeg || isPng || isWebp || isPdf)) {
+      setOperationsMessage('File का actual format उसके selected type से match नहीं करता। सही document file चुनें।');
+      return;
+    }
+    const extension = file.type === 'image/jpeg' ? 'jpg' : file.type === 'image/png' ? 'png' : file.type === 'image/webp' ? 'webp' : 'pdf';
+    const { data: authData, error: authError } = await supabase.auth.getUser();
+    if (authError || !authData.user?.id) {
+      setOperationsMessage('Admin session verify नहीं हुआ। दोबारा login करें।');
+      return;
+    }
+    const objectPath = walkerId + '/' + documentType + '-' + crypto.randomUUID() + '.' + extension;
+    setOperationsBusy(true);
+    setOperationsMessage('Private document upload हो रहा है…');
+    const { error: uploadError } = await supabase.storage.from('walker-private-documents').upload(objectPath, file, {
+      contentType: file.type,
+      cacheControl: '60',
+      upsert: false,
+    });
+    if (uploadError) {
+      setOperationsMessage('Document upload नहीं हुआ: ' + uploadError.message);
+      setOperationsBusy(false);
+      return;
+    }
+    const { error: metadataError } = await supabase.from('walker_documents').insert({
+      walker_id: walkerId,
+      document_type: documentType,
+      object_path: objectPath,
+      mime_type: file.type,
+      file_size_bytes: file.size,
+      uploaded_by: authData.user.id,
+    });
+    if (metadataError) {
+      const { error: cleanupError } = await supabase.storage.from('walker-private-documents').remove([objectPath]);
+      setOperationsMessage(cleanupError
+        ? 'Document record save नहीं हुआ और uploaded file cleanup भी confirm नहीं हुआ। Admin support की जरूरत है: ' + cleanupError.message
+        : 'Document record save नहीं हुआ; uploaded file हटा दी गई। कारण: ' + metadataError.message);
+    } else {
+      setOperationsMessage('Private document सुरक्षित bucket में upload हो गया।');
+      await loadOperations();
+    }
+    setOperationsBusy(false);
+  }
+
+  async function openWalkerDocument(document: WalkerDocument) {
+    if (!supabase) return;
+    const preview = window.open('about:blank', '_blank');
+    if (!preview) {
+      setOperationsMessage('Browser ने नया tab block कर दिया। Pop-ups allow करके दोबारा कोशिश करें।');
+      return;
+    }
+    preview.opener = null;
+    const { data, error: urlError } = await supabase.storage.from('walker-private-documents').createSignedUrl(document.object_path, 60);
+    if (urlError || !data?.signedUrl) {
+      preview.close();
+      setOperationsMessage('Document open नहीं हुआ: ' + (urlError?.message || 'Signed URL unavailable'));
+      return;
+    }
+    preview.location.href = data.signedUrl;
+  }
+
+  async function deleteWalkerDocument(document: WalkerDocument) {
+    if (!supabase) return;
+    const label = document.document_type.replace(/_/g, ' ');
+    if (!window.confirm('इस Walker का ' + label + ' document permanently delete करना है? यह action वापस नहीं होगा।')) return;
+    setOperationsBusy(true); setOperationsMessage('');
+    const { error: storageError } = await supabase.storage.from('walker-private-documents').remove([document.object_path]);
+    if (storageError) {
+      setOperationsMessage('File delete नहीं हुई; metadata सुरक्षित रखा गया: ' + storageError.message);
+      setOperationsBusy(false);
+      return;
+    }
+    const { error: metadataError } = await supabase.from('walker_documents').delete().eq('id', document.id);
+    if (metadataError) setOperationsMessage('File हट गई लेकिन metadata delete नहीं हुआ; Admin support की जरूरत है: ' + metadataError.message);
+    else { setOperationsMessage('Document permanently delete हो गया।'); await loadOperations(); }
+    setOperationsBusy(false);
+  }
+
+  async function updateWalkerAccountStatus(walkerId: string, status: 'active' | 'on_hold' | 'suspended' | 'deactivated') {
+    if (!supabase) return;
+    const labels = { active: 'Active', on_hold: 'On Hold', suspended: 'Suspended', deactivated: 'Deactivated' };
+    if (!window.confirm('Walker account को ' + labels[status] + ' करना है?')) return;
+    setOperationsBusy(true); setOperationsMessage('');
+    const { data, error: statusError } = await supabase.functions.invoke('admin-set-walker-status', {
+      body: { walker_id: walkerId, account_status: status },
+    });
+    if (statusError || data?.error) {
+      setOperationsMessage('Walker status update नहीं हुआ: ' + (data?.error || statusError?.message || 'Unknown error'));
+    } else {
+      setOperationsMessage('Walker account status: ' + labels[status]);
+    }
     await loadOperations();
     setOperationsBusy(false);
   }
@@ -627,8 +768,20 @@ export default function App() {
           {adminCustomers.length === 0 ? <p className="empty">अभी कोई customer account नहीं है।</p> : <div className="table-wrap"><table><thead><tr><th>Customer</th><th>Phone</th><th>Dogs & service location</th></tr></thead><tbody>{adminCustomers.map((customer) => <tr key={customer.id}><td>{customer.full_name || customer.id.slice(0, 8)}</td><td>{customer.phone || '—'}</td><td>{customer.dogs.length ? customer.dogs.map((dog) => dog.name + (dog.breed ? ' · ' + dog.breed : '') + (dog.service_address ? ' · ' + dog.service_address : ' · Address missing') + (dog.service_latitude !== null && dog.service_longitude !== null ? ' · Pin ' + dog.service_latitude.toFixed(4) + ', ' + dog.service_longitude.toFixed(4) : '')).join(' | ') : 'No dog added yet'}</td></tr>)}</tbody></table></div>}
         </section>
         <section className="panel route-panel" id="walkers">
-          <div className="panel-heading"><div><h3>Walker management</h3><p>New walker accounts stay pending until Admin approval.</p></div><button className="refresh" onClick={() => void loadOperations()} disabled={operationsBusy}>Refresh</button></div>
-          {walkersAdmin.length === 0 ? <p className="empty">अभी कोई walker account नहीं है।</p> : <div className="table-wrap"><table><thead><tr><th>Walker</th><th>Phone</th><th>Experience</th><th>Status</th><th>Action</th></tr></thead><tbody>{walkersAdmin.map((walker) => <tr key={walker.id}><td>{walker.profile?.full_name || walker.id.slice(0, 8)}</td><td>{walker.profile?.phone || '—'}</td><td>{walker.experience_years} years</td><td><span className={'pill ' + walker.verification_status}>{walker.verification_status}</span></td><td>{walker.verification_status === 'pending' ? <div className="payment-actions"><button className="refresh approve" disabled={operationsBusy} onClick={() => void reviewWalker(walker.id, 'approved')}>Approve</button><button className="refresh reject" disabled={operationsBusy} onClick={() => void reviewWalker(walker.id, 'rejected')}>Reject</button></div> : walker.verification_status === 'approved' ? <span className="subtle-count">Eligible for assignment</span> : '—'}</td></tr>)}</tbody></table></div>}
+          <div className="panel-heading"><div><h3>Walker management</h3><p>Admin creates and verifies each Walker profile. New accounts are Active; Admin can hold or close them later.</p></div><button className="refresh" onClick={() => void loadOperations()} disabled={operationsBusy}>Refresh</button></div>
+          <div className="credit-form">
+            <h4>Create walker account</h4>
+            <p className="muted">Admin पूरा account बनाएगा। Walker अपने registered mobile पर OTP verify करके login करेगा। कोई approval/rejection step नहीं है।</p>
+            <label>Walker full name<input value={walkerName} onChange={(event) => setWalkerName(event.target.value)} placeholder="Full name" maxLength={100} /></label>
+            <label>Indian mobile number<input value={walkerPhone} onChange={(event) => setWalkerPhone(event.target.value)} placeholder="9876543210" inputMode="tel" maxLength={14} /></label>
+            <label>Experience (years)<input type="number" min="0" max="60" step="0.5" value={walkerExperience} onChange={(event) => setWalkerExperience(event.target.value)} /></label>
+            <label>Service areas (comma separated)<input value={walkerAreas} onChange={(event) => setWalkerAreas(event.target.value)} placeholder="Gaur City 1, Gaur City 2" maxLength={500} /></label>
+            <label>Local address<textarea value={walkerLocalAddress} onChange={(event) => setWalkerLocalAddress(event.target.value)} placeholder="Current/local residential address" maxLength={500} required /></label>
+            <label>Permanent address<textarea value={walkerPermanentAddress} onChange={(event) => setWalkerPermanentAddress(event.target.value)} placeholder="Permanent residential address" maxLength={500} required /></label>
+            <label>Short bio (optional)<input value={walkerBio} onChange={(event) => setWalkerBio(event.target.value)} placeholder="Experience with dogs…" maxLength={1000} /></label>
+            <button className="refresh approve" disabled={operationsBusy} onClick={() => void createWalkerAccount()}>{operationsBusy ? 'Please wait…' : 'Create walker account'}</button>
+          </div>
+          {walkersAdmin.length === 0 ? <p className="empty">अभी कोई walker account नहीं है।</p> : <div className="table-wrap"><table><thead><tr><th>Walker</th><th>Phone</th><th>Experience</th><th>Account Status</th><th>Private documents (max 5 MB each)</th><th>Action</th></tr></thead><tbody>{walkersAdmin.map((walker) => <tr key={walker.id}><td>{walker.profile?.full_name || walker.id.slice(0, 8)}</td><td>{walker.profile?.phone || '—'}</td><td>{walker.experience_years} years</td><td><span className={'pill ' + walker.account_status}>{walker.account_status.replace('_', ' ')}</span></td><td><div className="document-upload-list"><label>Selfie<input type="file" accept="image/jpeg,image/png,image/webp" disabled={operationsBusy} onChange={(event) => { void uploadWalkerDocument(walker.id, 'profile_selfie', event.target.files?.[0]); event.currentTarget.value = ''; }} /></label><label>Aadhaar front<input type="file" accept="image/jpeg,image/png,image/webp,application/pdf" disabled={operationsBusy} onChange={(event) => { void uploadWalkerDocument(walker.id, 'aadhaar_front', event.target.files?.[0]); event.currentTarget.value = ''; }} /></label><label>Aadhaar back<input type="file" accept="image/jpeg,image/png,image/webp,application/pdf" disabled={operationsBusy} onChange={(event) => { void uploadWalkerDocument(walker.id, 'aadhaar_back', event.target.files?.[0]); event.currentTarget.value = ''; }} /></label><label>PAN card<input type="file" accept="image/jpeg,image/png,image/webp,application/pdf" disabled={operationsBusy} onChange={(event) => { void uploadWalkerDocument(walker.id, 'pan_card', event.target.files?.[0]); event.currentTarget.value = ''; }} /></label></div><div className="walker-document-list">{walkerDocuments.filter((document) => document.walker_id === walker.id).map((document) => <div className="walker-document-row" key={document.id}><span>{document.document_type.replace(/_/g, ' ')} · {(document.file_size_bytes / 1024).toFixed(0)} KB · {dateTime(document.created_at)}</span><button type="button" className="refresh" disabled={operationsBusy} onClick={() => void openWalkerDocument(document)}>View / download</button><button type="button" className="refresh reject" disabled={operationsBusy} onClick={() => void deleteWalkerDocument(document)}>Delete</button></div>)}{walkerDocuments.every((document) => document.walker_id !== walker.id) ? <small>No documents uploaded yet.</small> : null}</div><div className="payment-actions">{walker.account_status === 'active' ? <><button className="refresh" disabled={operationsBusy} onClick={() => void updateWalkerAccountStatus(walker.id, 'on_hold')}>Hold</button><button className="refresh reject" disabled={operationsBusy} onClick={() => void updateWalkerAccountStatus(walker.id, 'suspended')}>Suspend</button><button className="refresh reject" disabled={operationsBusy} onClick={() => void updateWalkerAccountStatus(walker.id, 'deactivated')}>Deactivate</button></> : walker.account_status === 'deactivated' ? <span className="subtle-count">Closed</span> : <><button className="refresh approve" disabled={operationsBusy} onClick={() => void updateWalkerAccountStatus(walker.id, 'active')}>Reactivate</button><button className="refresh reject" disabled={operationsBusy} onClick={() => void updateWalkerAccountStatus(walker.id, 'deactivated')}>Deactivate</button></>}</div></td></tr>)}</tbody></table></div>}
         </section>
         <section className="panel route-panel" id="weekly-schedule-requests">
           <div className="panel-heading"><div><h3>Weekly schedule change requests</h3><p>Customer ke recurring morning/evening time aur service address changes review karein. Approval se pehle old schedule active rehta hai.</p></div><button className="refresh" onClick={() => void loadOperations()} disabled={operationsBusy}>Refresh</button></div>
@@ -640,7 +793,7 @@ export default function App() {
         </section>
         <section className="panel route-panel" id="assignments">
           <div className="panel-heading"><div><h3>Walk assignment</h3><p>Assign each requested walk to one approved walker.</p></div></div>
-          {assignmentBookings.filter((booking) => booking.status === 'requested').length === 0 ? <p className="empty">कोई unassigned walk request नहीं है।</p> : <div className="payment-list">{assignmentBookings.filter((booking) => booking.status === 'requested').map((booking) => <div className="payment-row payment-review-row" key={booking.id}><div><strong>{booking.dog?.name || 'Dog'} · {booking.duration_minutes} min{booking.service_type === 'sunday_extra' ? ' · Sunday Extra · Paid' : ''}</strong><small>{booking.customer?.full_name || 'Customer'} {booking.customer?.phone ? '· ' + booking.customer.phone : ''}</small><small>{dateTime(booking.scheduled_at)} · {booking.service_slot ? booking.service_slot.toUpperCase() + ' · ' : ''}{booking.service_address}</small>{booking.service_latitude !== null && booking.service_longitude !== null ? <small><a className="map-link" href={'https://www.openstreetmap.org/?mlat=' + booking.service_latitude + '&mlon=' + booking.service_longitude + '#map=17/' + booking.service_latitude + '/' + booking.service_longitude} target="_blank" rel="noreferrer">Open pickup pin ↗</a></small> : null}<div className="payment-actions"><select value={walkerSelections[booking.id] || ''} onChange={(event) => setWalkerSelections((current) => ({ ...current, [booking.id]: event.target.value }))}><option value="">Approved walker चुनें</option>{walkersAdmin.filter((walker) => walker.verification_status === 'approved').map((walker) => <option key={walker.id} value={walker.id}>{walker.profile?.full_name || walker.profile?.phone || walker.id.slice(0, 8)}</option>)}</select><button className="refresh approve" disabled={operationsBusy} onClick={() => void assignBooking(booking.id)}>Assign walk</button></div></div><span className="pill pending">Requested</span></div>)}</div>}
+          {assignmentBookings.filter((booking) => booking.status === 'requested').length === 0 ? <p className="empty">कोई unassigned walk request नहीं है।</p> : <div className="payment-list">{assignmentBookings.filter((booking) => booking.status === 'requested').map((booking) => <div className="payment-row payment-review-row" key={booking.id}><div><strong>{booking.dog?.name || 'Dog'} · {booking.duration_minutes} min{booking.service_type === 'sunday_extra' ? ' · Sunday Extra · Paid' : ''}</strong><small>{booking.customer?.full_name || 'Customer'} {booking.customer?.phone ? '· ' + booking.customer.phone : ''}</small><small>{dateTime(booking.scheduled_at)} · {booking.service_slot ? booking.service_slot.toUpperCase() + ' · ' : ''}{booking.service_address}</small>{booking.service_latitude !== null && booking.service_longitude !== null ? <small><a className="map-link" href={'https://www.openstreetmap.org/?mlat=' + booking.service_latitude + '&mlon=' + booking.service_longitude + '#map=17/' + booking.service_latitude + '/' + booking.service_longitude} target="_blank" rel="noreferrer">Open pickup pin ↗</a></small> : null}<div className="payment-actions"><select value={walkerSelections[booking.id] || ''} onChange={(event) => setWalkerSelections((current) => ({ ...current, [booking.id]: event.target.value }))}><option value="">Active walker चुनें</option>{walkersAdmin.filter((walker) => walker.account_status === 'active').map((walker) => <option key={walker.id} value={walker.id}>{walker.profile?.full_name || walker.profile?.phone || walker.id.slice(0, 8)}</option>)}</select><button className="refresh approve" disabled={operationsBusy} onClick={() => void assignBooking(booking.id)}>Assign walk</button></div></div><span className="pill pending">Requested</span></div>)}</div>}
           {assignmentBookings.some((booking) => booking.status === 'assigned') ? <p className="notice inline-notice">{assignmentBookings.filter((booking) => booking.status === 'assigned').length} walk(s) already assigned. Walker sees only their own assigned walks.</p> : null}
         </section>
         <section className="panel route-panel" id="pricing">

@@ -90,6 +90,7 @@ export default function App() {
   const [otp, setOtp] = useState('');
   const [otpSent, setOtpSent] = useState(false);
   const [profile, setProfile] = useState<Profile | null>(null);
+  const [walkerAccountStatus, setWalkerAccountStatus] = useState('active');
   const [userId, setUserId] = useState('');
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState('');
@@ -140,6 +141,7 @@ export default function App() {
 
   async function loadProfile(id: string) {
     if (!supabase) return;
+    setError('');
     const { data, error: profileError } = await supabase.from('profiles')
       .select('role, full_name, phone').eq('id', id).maybeSingle();
     if (profileError || !data) {
@@ -150,7 +152,16 @@ export default function App() {
     }
     setUserId(id);
     setProfile(data as Profile);
-    setPhoneInput(''); setOtp(''); setOtpSent(false); setError('');
+    if (data.role === 'walker') {
+      const { data: walkerRow, error: walkerStatusError } = await supabase.from('walkers').select('account_status').eq('id', id).maybeSingle();
+      if (walkerStatusError || !walkerRow) {
+        setWalkerAccountStatus('deactivated');
+        setError('Walker account status नहीं मिल पाया। Admin से संपर्क करें।');
+      } else {
+        setWalkerAccountStatus(walkerRow.account_status || 'active');
+      }
+    } else setWalkerAccountStatus('active');
+    setPhoneInput(''); setOtp(''); setOtpSent(false);
   }
 
   const loadCustomerData = useCallback(async () => {
@@ -217,6 +228,7 @@ export default function App() {
 
   const loadWalkerData = useCallback(async () => {
     if (!supabase || !userId || profile?.role !== 'walker') return;
+    if (walkerAccountStatus !== 'active') { setAssignedWalks([]); setLoadingData(false); return; }
     setLoadingData(true); setError('');
     const { data, error: queryError } = await supabase.from('bookings')
       .select('id, scheduled_at, duration_minutes, service_address, customer_notes, status, actual_started_at, actual_ended_at, actual_duration_minutes, walk_report, dog:dogs(name, breed)')
@@ -224,7 +236,7 @@ export default function App() {
     if (queryError) setError('Assigned walks load नहीं हुए: ' + queryError.message);
     else setAssignedWalks((data ?? []) as unknown as AssignedWalk[]);
     setLoadingData(false);
-  }, [userId, profile?.role]);
+  }, [userId, profile?.role, walkerAccountStatus]);
 
   useEffect(() => {
     if (!supabase) return;
@@ -249,7 +261,7 @@ export default function App() {
       .subscribe();
     return () => { void supabase?.removeChannel(channel); };
   }, [profile?.role, userId, loadCustomerWalks]);
-  useEffect(() => { if (profile?.role === 'walker' && userId) void loadWalkerData(); }, [profile?.role, userId, loadWalkerData]);
+  useEffect(() => { if (profile?.role === 'walker' && userId) void loadWalkerData(); }, [profile?.role, userId, walkerAccountStatus, loadWalkerData]);
 
 
 
@@ -258,7 +270,15 @@ export default function App() {
     const normalized = normalizeIndianPhone(phoneInput);
     if (!/^\+91[6-9]\d{9}$/.test(normalized)) { setError('कृपया सही 10 अंकों का Indian mobile number डालें।'); return; }
     setBusy(true); setError(''); setMessage('');
-    const { error: otpError } = await supabase.auth.signInWithOtp({ phone: normalized });
+    const { data: eligibility, error: eligibilityError } = await supabase.functions.invoke('check-login-phone', {
+      body: { phone: normalized },
+    });
+    if (eligibilityError || !eligibility?.allowed) {
+      setError('Invalid Number: यह मोबाइल नंबर DOJO WALK में रजिस्टर्ड नहीं है। Admin से संपर्क करें।');
+      setBusy(false);
+      return;
+    }
+    const { error: otpError } = await supabase.auth.signInWithOtp({ phone: normalized, options: { shouldCreateUser: false } });
     if (otpError) setError('OTP नहीं भेजा जा सका: ' + otpError.message);
     else { setPhone(normalized); setOtpSent(true); setMessage('OTP भेज दिया गया है। SMS में आया 6 अंकों का code डालें।'); }
     setBusy(false);
@@ -768,6 +788,7 @@ export default function App() {
               <View style={styles.notice}><Text style={styles.noticeTitle}>Payment verification</Text><Text style={styles.noticeBody}>आपका payment reference Admin verify करेगा। App payment को अपने-आप successful नहीं मानेगा।</Text></View>
               <Pressable style={styles.textButton} onPress={() => void loadCustomerData()}><Text style={styles.textButtonLabel}>↻ Refresh my details</Text></Pressable>
             </> : profile.role === 'walker' ? <>
+              {walkerAccountStatus !== 'active' ? <View style={styles.notice}><Text style={styles.noticeTitle}>Walker Account: {walkerAccountStatus.replace('_', ' ').toUpperCase()}</Text><Text style={styles.noticeBody}>आपका account अभी काम के लिए active नहीं है। कृपया DOJO WALK Admin से संपर्क करें।</Text></View> : <>
               <View style={styles.sectionHeader}><View><Text style={styles.sectionTitle}>मेरी Assigned Walks</Text><Text style={styles.sectionHint}>सिर्फ आपको assign की गई walks दिखाई जाती हैं।</Text></View><Pressable style={styles.smallPrimary} onPress={() => void loadWalkerData()}><Text style={styles.smallPrimaryText}>Refresh</Text></Pressable></View>
               {loadingData ? <ActivityIndicator color="#F07824" style={{ margin: 20 }} /> : assignedWalks.length === 0 ? <View style={styles.empty}><Text style={styles.emptyTitle}>अभी कोई walk assign नहीं हुई</Text><Text style={styles.body}>Admin द्वारा आपको dog और walk assign करने पर वह यहाँ दिखाई देगी।</Text></View> : assignedWalks.map((walk) => <View style={styles.dogCard} key={walk.id}>
                 <View style={styles.dogAvatar}><Text style={styles.dogAvatarText}>{(walk.dog?.name || 'D').slice(0, 1).toUpperCase()}</Text></View>
@@ -787,6 +808,7 @@ export default function App() {
               </View>)}
               {gpsMessage ? <Text style={styles.success}>{gpsMessage}</Text> : null}
               <View style={styles.notice}><Text style={styles.noticeTitle}>GPS tracking</Text><Text style={styles.noticeBody}>Walk active रहने पर GPS points save होते हैं। Background GPS के लिए location permission और native development build जरूरी है; Expo Go में background tracking उपलब्ध नहीं होती।</Text></View>
+              </>}
             </> : <View style={styles.card}>
               <Text style={styles.cardEyebrow}>{roleText.toUpperCase()}</Text>
               <Text style={styles.welcome}>Admin account connected</Text>
